@@ -1,4 +1,5 @@
 #include "common.cuh"
+#include "fl.cuh"
 
 enum OpKind
 {
@@ -18,6 +19,7 @@ struct Args
     char* outputFile;
     OpKind opKind;
     AlgoKind algoKind;
+    bool cpuVersion;
 };
 
 Args* parseArgs(int argc, char** argv)
@@ -30,11 +32,11 @@ Args* parseArgs(int argc, char** argv)
 
     if (strcmp(argv[1], "c") == 0)
     {
-        args->opKind = OpKind::Compress;
+        args->opKind = Compress;
     }
     else if (strcmp(argv[1], "d") == 0)
     {
-        args->opKind = OpKind::Decompress;
+        args->opKind = Decompress;
     }
     else
     {
@@ -43,11 +45,11 @@ Args* parseArgs(int argc, char** argv)
     }
     if (strcmp(argv[2], "fl") == 0)
     {
-        args->algoKind = AlgoKind::FL;
+        args->algoKind = FL;
     }
     else if (strcmp(argv[2], "rl") == 0)
     {
-        args->algoKind = AlgoKind::RL;
+        args->algoKind = RL;
     }
     else
     {
@@ -56,6 +58,14 @@ Args* parseArgs(int argc, char** argv)
     }
     args->inputFile = argv[3];
     args->outputFile = argv[4];
+    if (argc >= 6 && strcmp(argv[5], "cpu") == 0)
+    {
+        args->cpuVersion = true;
+    }
+    else
+    {
+        args->cpuVersion = false;
+    }
 
     return args;
 }
@@ -67,13 +77,36 @@ int main(int argc, char** argv)
     Args* args = parseArgs(argc, argv);
     if (args == nullptr)
     {
-        ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file>");
+        ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file> [cpu (optional)]");
+    }
+    u64 dataLen;
+    // TODO: measure reading time
+    byte* data = read_all(args->inputFile, &dataLen);
+
+    if (args->opKind == Compress)
+    {
+        if (args->algoKind == FL)
+        {
+            printf("fl compression\n");
+        }
+        else
+        {
+            printf("rl compression\n");
+        }
+    }
+    else
+    {
+        if (args->algoKind == FL)
+        {
+            printf("fl decompression\n");
+        }
+        else
+        {
+            printf("rl decompression\n");
+        }
     }
 
-    // const char* path = "test_data/lorem";
-    // long len;
-    // byte* content = read_all(path, &len);
-
+    delete[] data;
     delete args;
 
     return EXIT_SUCCESS;

@@ -1,25 +1,27 @@
-CC=nvcc
 FLAGS_COMMON=-Wno-deprecated-gpu-targets
 FLAGS_DEBUG=-G
 FLAGS_RELEASE=-O3
-EXE=build/compress
+EXE=compress
 CUDA_FILES=$(wildcard src/*.cu)
 HEADER_FILES=$(wildcard include/*.cuh)
 OBJ_FILES=$(patsubst src/%.cu,build/%.o,$(CUDA_FILES))
+
+# this variable name makes no sense, but it's needed to make CLion detect the include path properly
+C_FLAGS=-Iinclude
 
 .PHONY: clean debug release all
 
 debug: $(OBJ_FILES)
 	mkdir -p build/debug
-	$(CC) $(FLAGS_COMMON) $(FLAGS_DEBUG) $(OBJ_FILES) -o build/debug/compress
+	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(OBJ_FILES) -o build/debug/$(EXE)
 
 release: $(OBJ_FILES)
 	mkdir -p build/release
-	$(CC) $(FLAGS_COMMON) $(FLAGS_RELEASE) $(OBJ_FILES) -o build/release/compress
+	nvcc $(FLAGS_COMMON) $(FLAGS_RELEASE) $(OBJ_FILES) -o build/release/$(EXE)
 
-$(OBJ_FILES): $(CUDA_FILES) $(HEADER_FILES)
+build/%.o: src/%.cu
 	mkdir -p build
-	$(CC) $(FLAGS_COMMON) -Iinclude -c $< -o $@
+	nvcc $(FLAGS_COMMON) $(C_FLAGS) -c $< -o $@
 
 clean:
 	rm -rf build/

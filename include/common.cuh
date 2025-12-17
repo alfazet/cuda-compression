@@ -7,6 +7,10 @@
 #include "cuda_runtime.h"
 
 typedef unsigned char byte;
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef unsigned long u64;
 
 #define ERR_AND_DIE(reason) \
     do { \
@@ -21,7 +25,7 @@ inline void cudaErrCheck(const cudaError_t res)
         ERR_AND_DIE(cudaGetErrorString(res));
 }
 
-inline byte* read_all(const char* path, long* len)
+inline byte* read_all(const char* path, u64* len)
 {
     FILE* f = fopen(path, "r");
     if (f == nullptr)
@@ -29,14 +33,13 @@ inline byte* read_all(const char* path, long* len)
         ERR_AND_DIE("fopen");
     }
     fseek(f, 0, SEEK_END);
-    long file_size = ftell(f);
+    u64 file_size = ftell(f);
     *len = file_size;
     fseek(f, 0, SEEK_SET);
-    // change to new/delete
-    byte* content = (byte*)malloc(file_size * sizeof(byte));
+    byte* content = new byte[file_size];
     if (content == nullptr)
     {
-        ERR_AND_DIE("malloc");
+        ERR_AND_DIE("new");
     }
     if (fread(content, sizeof(byte), file_size, f) != file_size)
     {
@@ -47,7 +50,7 @@ inline byte* read_all(const char* path, long* len)
     return content;
 }
 
-inline void write_all(const char* path, byte* content, long len)
+inline void write_all(const char* path, byte* content, u64 len)
 {
     FILE* f = fopen(path, "w");
     if (f == nullptr)
