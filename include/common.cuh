@@ -32,6 +32,7 @@ inline byte* read_all(const char* path, long* len)
     long file_size = ftell(f);
     *len = file_size;
     fseek(f, 0, SEEK_SET);
+    // change to new/delete
     byte* content = (byte*)malloc(file_size * sizeof(byte));
     if (content == nullptr)
     {
