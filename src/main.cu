@@ -82,14 +82,12 @@ int main(int argc, char** argv)
     {
         ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file> [cpu (optional)]");
     }
-    u64 dataLen;
-    byte* data = read_all(args->inputFile, &dataLen);
 
     if (args->opKind == Compress)
     {
         if (args->algoKind == FL)
         {
-            flCompression(data, dataLen, args->outputFile, true);
+            flCompression(args->inputFile, args->outputFile, args->cpuVersion);
         }
         else
         {
@@ -100,15 +98,13 @@ int main(int argc, char** argv)
     {
         if (args->algoKind == FL)
         {
-            printf("fl decompression\n");
+            flDecompression(args->inputFile, args->outputFile, args->cpuVersion);
         }
         else
         {
             printf("rl decompression\n");
         }
     }
-
-    delete[] data;
     delete args;
 
     return EXIT_SUCCESS;

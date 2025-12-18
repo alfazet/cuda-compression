@@ -2,16 +2,16 @@
 
 __global__ void flCompressionGPU();
 
-Fl* flCompressionCPU(Arena* arena, byte* data, u64 dataLen)
+void flCompressionCPU(Fl* fl, const byte* data)
 {
-    Fl* fl = flInitCPU(arena, dataLen);
     // printf("data len: %lu\n", dataLen);
     for (u64 i = 0; i < fl->nChunks; i++)
     {
         // printf("processing chunk %lu\n", i);
         u64 len = CHUNK_SIZE;
-        if ((i + 1) * CHUNK_SIZE > dataLen)
+        if ((i + 1) * CHUNK_SIZE > fl->dataLen)
         {
+            // the last chunk might be shorter than CHUNK_SIZE bytes
             len = fl->dataLen % CHUNK_SIZE;
         }
         // printf("bytes: %lu\n", len);
@@ -55,41 +55,27 @@ Fl* flCompressionCPU(Arena* arena, byte* data, u64 dataLen)
             }
         }
     }
-
-    return fl;
 }
 
-void flCompression(byte* data, u64 dataLen, const char* outPath, bool cpuVersion)
+void flCompression(const char* inputFile, const char* outputFile, bool cpuVersion)
 {
+    u64 dataLen;
+    byte* data = read_all(inputFile, &dataLen);
+    Arena* cpuArena = arenaCPUInit();
+    Fl* fl = flInit(cpuArena, dataLen);
     if (cpuVersion)
     {
-        Arena* arena = arenaCPUInit();
-        Fl* fl = flCompressionCPU(arena, data, dataLen);
-        write_all(outPath, fl->chunks[0], 3);
-        arenaCPUFree(arena);
+        flCompressionCPU(fl, data);
     }
     else
     {
+        // create a GPU arena
+        // copy Fl from CPU to GPU
         // flCompressionGPU();
+        // copy Fl from GPU to CPU
+        // free the GPU arena
     }
-}
-
-__global__ void flDecompressionGPU();
-
-byte* flDecompressionCPU(Fl* fl)
-{
-    return nullptr;
-}
-
-byte* flDecompression(Fl* fl, bool cpuVersion)
-{
-    if (cpuVersion)
-    {
-        return flDecompressionCPU(fl);
-    }
-    else
-    {
-        // flDecompressionGPU();
-        return nullptr;
-    }
+    flToFile(outputFile, fl);
+    arenaCPUFree(cpuArena);
+    delete[] data;
 }
