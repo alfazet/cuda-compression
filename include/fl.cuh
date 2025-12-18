@@ -54,7 +54,7 @@ inline Fl* flFromFile(const char* path, Arena* cpuArena)
         ERR_AND_DIE("fread");
     }
     Fl* fl = flInit(cpuArena, dataLen);
-    if (fread(fl->bitDepth, sizeof(u8), fl->nChunks, f) != 1)
+    if (fread(fl->bitDepth, sizeof(u8), fl->nChunks, f) != fl->nChunks)
     {
         ERR_AND_DIE("fread");
     }
@@ -87,7 +87,7 @@ inline void flToFile(const char* path, Fl* fl)
     {
         ERR_AND_DIE("fwrite");
     }
-    if (fwrite(fl->bitDepth, sizeof(u8), fl->nChunks, f) != 1)
+    if (fwrite(fl->bitDepth, sizeof(u8), fl->nChunks, f) != fl->nChunks)
     {
         ERR_AND_DIE("fwrite");
     }

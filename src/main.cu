@@ -73,7 +73,6 @@ Args* parseArgs(int argc, char** argv)
 int main(int argc, char** argv)
 {
     // TODO: "Podczas wykonania program powinien wypisywać na standardowe wyjście (z możliwością przekierowania do pliku!) informacje o przebiegu obliczeń."
-    // TODO: FL decompression
     // TODO: some framework for testing
     // TODO: FL GPU versions
 
