@@ -64,4 +64,10 @@ inline void write_all(const char* path, byte* content, u64 len)
     fclose(f);
 }
 
+template <typename T>
+T cdiv(T a, T b)
+{
+    return (a + b - 1) / b;
+}
+
 #endif //CUDA_COMPRESSION_COMMON_CUH

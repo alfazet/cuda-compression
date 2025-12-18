@@ -3,6 +3,8 @@
 
 #include "common.cuh"
 
+constexpr u64 ARENA_SIZE = 1 << 20;
+
 struct Arena
 {
     u64 size;
@@ -10,12 +12,13 @@ struct Arena
     byte* start;
 };
 
-inline Arena* arenaCPUInit(u64 size)
+inline Arena* arenaCPUInit()
 {
     Arena* arena = new Arena;
-    arena->size = size;
+    arena->size = ARENA_SIZE;
     arena->offset = 0;
-    arena->start = new byte[size];
+    // allocate and zero-out the memory
+    arena->start = new byte[ARENA_SIZE]();
     if (arena->start == nullptr)
     {
         return nullptr;
@@ -24,6 +27,7 @@ inline Arena* arenaCPUInit(u64 size)
     return arena;
 }
 
+// allocate `len` bytes in the arena
 inline byte* arenaCPUAlloc(Arena* arena, u64 len)
 {
     if (arena->offset + len > arena->size)
@@ -41,11 +45,12 @@ inline void arenaCPUFree(Arena* arena)
 }
 
 // TODO: GPU versions
-inline Arena* arenaGPUInit(u64 size)
+inline Arena* arenaGPUInit()
 {
     return nullptr;
 }
 
+// allocate `len` bytes in the arena
 inline byte* arenaGPUAlloc(Arena* arena, u64 len)
 {
     return nullptr;

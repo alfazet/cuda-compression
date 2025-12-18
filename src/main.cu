@@ -72,7 +72,10 @@ Args* parseArgs(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-    // "Podczas wykonania program powinien wypisywać na standardowe wyjście (z możliwością przekierowania do pliku!) informacje o przebiegu obliczeń."
+    // TODO: "Podczas wykonania program powinien wypisywać na standardowe wyjście (z możliwością przekierowania do pliku!) informacje o przebiegu obliczeń."
+    // TODO: FL decompression
+    // TODO: some framework for testing
+    // TODO: FL GPU versions
 
     Args* args = parseArgs(argc, argv);
     if (args == nullptr)
@@ -80,14 +83,13 @@ int main(int argc, char** argv)
         ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file> [cpu (optional)]");
     }
     u64 dataLen;
-    // TODO: measure reading time
     byte* data = read_all(args->inputFile, &dataLen);
 
     if (args->opKind == Compress)
     {
         if (args->algoKind == FL)
         {
-            printf("fl compression\n");
+            flCompression(data, dataLen, args->outputFile, true);
         }
         else
         {
