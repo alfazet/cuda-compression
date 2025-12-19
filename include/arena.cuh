@@ -44,21 +44,4 @@ inline void arenaCPUFree(Arena* arena)
     delete[] arena->start;
 }
 
-// TODO: GPU versions
-inline Arena* arenaGPUInit()
-{
-    return nullptr;
-}
-
-// allocate `len` bytes in the arena
-inline byte* arenaGPUAlloc(Arena* arena, u64 len)
-{
-    return nullptr;
-}
-
-inline void arenaGPUFree(Arena* arena)
-{
-    //
-}
-
 #endif //CUDA_COMPRESSION_ARENA_CUH

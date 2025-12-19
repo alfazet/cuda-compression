@@ -73,7 +73,6 @@ Args* parseArgs(int argc, char** argv)
 int main(int argc, char** argv)
 {
     // TODO: time taken for each stage - reading the input file, computing, ...
-    // TODO: testing
     // TODO: FL GPU versions, RL
 
     Args* args = parseArgs(argc, argv);

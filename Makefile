@@ -1,5 +1,5 @@
 FLAGS_COMMON=-Wno-deprecated-gpu-targets
-FLAGS_DEBUG=-G
+FLAGS_DEBUG=-G -g
 FLAGS_RELEASE=-O3
 EXE=compress
 CUDA_FILES=$(wildcard src/*.cu)
@@ -21,7 +21,7 @@ debug: $(OBJ_FILES)
 
 build/%.o: src/%.cu
 	mkdir -p build
-	nvcc $(FLAGS_COMMON) $(C_FLAGS) -c $< -o $@
+	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(C_FLAGS) -c $< -o $@
 
 all: debug release
 

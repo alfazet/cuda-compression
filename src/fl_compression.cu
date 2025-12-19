@@ -1,6 +1,6 @@
 #include "fl.cuh"
 
-__global__ void flCompressionGPU();
+__global__ void flCompressionGPU(Fl* fl, const byte* data);
 
 void flCompressionCPU(Fl* fl, const byte* data)
 {
@@ -61,11 +61,18 @@ void flCompression(const char* inputFile, const char* outputFile, bool cpuVersio
     }
     else
     {
-        // create a GPU arena
-        // copy Fl from CPU to GPU
+        Fl* dFl;
+        cudaErrCheck(cudaMalloc(&dFl, sizeof(Fl)));
+        flCopyToGPU(dFl, fl);
+
+        byte* dData;
+        cudaErrCheck(cudaMalloc(&dData, dataLen * sizeof(byte)));
+        cudaErrCheck(cudaMemcpy(dData, data, dataLen * sizeof(byte), cudaMemcpyHostToDevice));
         // flCompressionGPU();
         // copy Fl from GPU to CPU
-        // free the GPU arena
+        // fl = flCopyToCPU(dFl);
+        cudaErrCheck(cudaFree(dData));
+        flFreeGPU(dFl);
     }
     flToFile(outputFile, fl);
     arenaCPUFree(cpuArena);
