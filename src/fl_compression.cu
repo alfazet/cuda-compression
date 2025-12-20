@@ -69,7 +69,6 @@ void flCompressionCPU(Fl* fl, const byte* data)
         }
         fl->bitDepth[i] = bitDepth;
 
-        fprintf(stderr, "---------------------------------- chunk: %lu, len: %lu\n", i, len);
         for (u64 j = 0; j < len; j++)
         {
             byte curByte = (data[i * CHUNK_SIZE + j] << (8 - bitDepth));

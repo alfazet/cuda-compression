@@ -24,7 +24,7 @@ inline Fl* flInit(Arena* cpuArena, u64 dataLen)
     fl->dataLen = dataLen;
     fl->nChunks = cdiv(dataLen, CHUNK_SIZE);
     fl->bitDepth = (u8*)arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(u8));
-    fl->chunks = (byte(*)[CHUNK_SIZE])arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(byte));
+    fl->chunks = (byte(*)[CHUNK_SIZE])arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(byte*));
 
     return fl;
 }

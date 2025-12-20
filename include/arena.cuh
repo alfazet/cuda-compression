@@ -3,7 +3,7 @@
 
 #include "common.cuh"
 
-constexpr u64 ARENA_SIZE = 1 << 20;
+constexpr u64 ARENA_SIZE = 1 << 26;
 
 struct Arena
 {
