@@ -21,7 +21,7 @@ debug: $(OBJ_FILES)
 
 build/%.o: src/%.cu $(HEADER_FILES)
 	mkdir -p build
-	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(C_FLAGS) -c $< -o $@
+	nvcc $(FLAGS_COMMON) $(C_FLAGS) -c $< -o $@
 
 all: debug release
 

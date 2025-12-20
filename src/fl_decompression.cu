@@ -1,97 +1,56 @@
 #include "fl.cuh"
 
-__global__ void flDecompressionGPU(u64 dataLen, byte* decompressed, const u8* bitDepth,
-                                   const byte (*chunks)[CHUNK_SIZE])
+void flDecompressionCPU(const Fl& fl, std::vector<byte>& decompressed)
 {
-    u64 tidInBlock = threadIdx.x, blockId = blockIdx.x;
-    u64 tidGlobal = blockId * blockDim.x + tidInBlock;
-    if (tidGlobal >= dataLen)
-    {
-        return;
-    }
-
-    u8 blockBitDepth = bitDepth[blockId];
-    u64 bitLoc = blockBitDepth * tidInBlock;
-    u64 byteLoc = (bitLoc >> 3); // loc = location
-    u64 bitOffset = (bitLoc & 0b111);
-    byte mask = (0xff << (8 - blockBitDepth));
-    mask = (mask >> bitOffset);
-    byte decoded = ((chunks[blockId][byteLoc] & mask) << bitOffset);
-    decoded = (decoded >> (8 - blockBitDepth));
-    if (bitOffset != 0)
-    {
-        mask = (0xff << (8 - bitOffset)) << (8 - blockBitDepth);
-        decoded |= (((chunks[blockId][byteLoc + 1] & mask) >> (8 - bitOffset)) >> (8 - blockBitDepth));
-    }
-    decompressed[tidGlobal] = decoded;
-}
-
-void flDecompressionCPU(const Fl* fl, byte* decompressed)
-{
-    for (u64 i = 0; i < fl->nChunks; i++)
+    for (u64 i = 0; i < fl.nChunks; i++)
     {
         u64 len = CHUNK_SIZE;
-        if ((i + 1) * CHUNK_SIZE > fl->dataLen)
+        if ((i + 1) * CHUNK_SIZE > fl.dataLen)
         {
             // the last chunk might be shorter than CHUNK_SIZE bytes
-            len = fl->dataLen % CHUNK_SIZE;
+            len = fl.dataLen % CHUNK_SIZE;
         }
-        u8 bitDepth = fl->bitDepth[i];
+        u8 bitDepth = fl.bitDepth[i];
         for (u64 j = 0; j < len; j++)
         {
             u64 bitLoc = bitDepth * j;
-            u64 byteLoc = (bitLoc >> 3); // loc = location
-            u64 bitOffset = (bitLoc & 0b111);
-            byte mask = (0xff << (8 - bitDepth));
-            mask = (mask >> bitOffset);
-            byte decoded = ((fl->chunks[i][byteLoc] & mask) << bitOffset);
-            decoded = (decoded >> (8 - bitDepth));
+            u64 byteLoc = bitLoc >> 3;
+            u64 bitOffset = bitLoc & 0b111;
+            byte mask = 0xff << (8 - bitDepth);
+            mask = mask >> bitOffset;
+            byte decoded = (fl.chunks[i][byteLoc] & mask) << bitOffset;
+            decoded = decoded >> (8 - bitDepth);
             if (bitOffset != 0)
             {
                 mask = (0xff << (8 - bitOffset)) << (8 - bitDepth);
-                decoded |= (((fl->chunks[i][byteLoc + 1] & mask) >> (8 - bitOffset)) >> (8 - bitDepth));
+                decoded |= ((fl.chunks[i][byteLoc + 1] & mask) >> (8 - bitOffset)) >> (8 - bitDepth);
             }
             decompressed[i * CHUNK_SIZE + j] = decoded;
         }
     }
 }
 
-void flDecompression(const char* inputFile, const char* outputFile, bool cpuVersion)
+// takes "flattened" chunks - chunk 0 is [0, CHUNK_SIZE), chunk 1 is [CHUNK_SIZE, 2 * CHUNK_SIZE), ...
+__global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, const byte* chunks, u64 nChunks)
 {
-    Arena* arena = arenaCPUInit();
-    Fl* fl = flFromFile(inputFile, arena);
-    byte* decompressed = new byte[fl->dataLen];
-    if (cpuVersion)
+    //
+}
+
+void flDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
+{
+    Fl fl = flFromFile(inputPath);
+    std::vector<byte> decompressed(fl.dataLen);
+    switch (version)
+    {
+    case CPU:
     {
         flDecompressionCPU(fl, decompressed);
+        break;
     }
-    else
+    case GPU:
     {
-        byte* dDecompressed;
-        cudaErrCheck(cudaMalloc(&dDecompressed, fl->dataLen * sizeof(byte)));
-
-        // CPU -> GPU
-        u8* dBitDepth;
-        cudaErrCheck(cudaMalloc(&dBitDepth, fl->nChunks * sizeof(u8)));
-        cudaErrCheck(cudaMemcpy(dBitDepth, fl->bitDepth, fl->nChunks * sizeof(u8), cudaMemcpyHostToDevice));
-        byte (*dChunks)[CHUNK_SIZE];
-        cudaErrCheck(cudaMalloc(&dChunks, fl->nChunks * CHUNK_SIZE * sizeof(byte)));
-        for (u64 i = 0; i < fl->nChunks; i++)
-        {
-            cudaErrCheck(cudaMemcpy(dChunks + i, fl->chunks[i], CHUNK_SIZE * sizeof(byte),
-                                    cudaMemcpyHostToDevice));
-        }
-
-        flDecompressionGPU<<<fl->nChunks, CHUNK_SIZE>>>(fl->dataLen, dDecompressed, dBitDepth, dChunks);
-
-        // GPU -> CPU
-        cudaErrCheck(cudaMemcpy(decompressed, dDecompressed, fl->dataLen * sizeof(byte), cudaMemcpyDeviceToHost));
-
-        cudaErrCheck(cudaFree(dDecompressed));
-        cudaErrCheck(cudaFree(dBitDepth));
-        cudaErrCheck(cudaFree(dChunks));
+        break;
     }
-    write_all(outputFile, decompressed, fl->dataLen);
-    arenaCPUFree(arena);
-    // delete[] decompressed;
+    }
+    writeDataFile(outputPath, decompressed);
 }

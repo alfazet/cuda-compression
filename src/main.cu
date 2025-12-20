@@ -15,56 +15,56 @@ enum AlgoKind
 
 struct Args
 {
-    char* inputFile;
-    char* outputFile;
+    std::string inputFile;
+    std::string outputFile;
     OpKind opKind;
     AlgoKind algoKind;
-    bool cpuVersion;
+    Version version;
 };
 
-Args* parseArgs(int argc, char** argv)
+std::optional<Args> parseArgs(int argc, char** argv)
 {
     if (argc < 5)
     {
-        return nullptr;
+        return {};
     }
-    Args* args = new Args;
+    Args args;
 
     if (strcmp(argv[1], "c") == 0)
     {
-        args->opKind = Compress;
+        args.opKind = Compress;
     }
     else if (strcmp(argv[1], "d") == 0)
     {
-        args->opKind = Decompress;
+        args.opKind = Decompress;
     }
     else
     {
         fprintf(stderr, "<operation> must be c (compress) or d (decompress)\n");
-        return nullptr;
+        return {};
     }
     if (strcmp(argv[2], "fl") == 0)
     {
-        args->algoKind = FL;
+        args.algoKind = FL;
     }
     else if (strcmp(argv[2], "rl") == 0)
     {
-        args->algoKind = RL;
+        args.algoKind = RL;
     }
     else
     {
         fprintf(stderr, "<method> must be fl (fixed-legth) or rl (run-length)\n");
-        return nullptr;
+        return {};
     }
-    args->inputFile = argv[3];
-    args->outputFile = argv[4];
+    args.inputFile = std::string(argv[3]);
+    args.outputFile = std::string(argv[4]);
     if (argc >= 6 && strcmp(argv[5], "cpu") == 0)
     {
-        args->cpuVersion = true;
+        args.version = CPU;
     }
     else
     {
-        args->cpuVersion = false;
+        args.version = GPU;
     }
 
     return args;
@@ -73,10 +73,10 @@ Args* parseArgs(int argc, char** argv)
 int main(int argc, char** argv)
 {
     // TODO: time taken for each stage - reading the input file, computing, ...
-    // TODO: FL GPU versions, RL
+    // TODO: RL
 
-    Args* args = parseArgs(argc, argv);
-    if (args == nullptr)
+    std::optional<Args> args = parseArgs(argc, argv);
+    if (!args.has_value())
     {
         ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file> [cpu (optional)]");
     }
@@ -85,25 +85,24 @@ int main(int argc, char** argv)
     {
         if (args->algoKind == FL)
         {
-            flCompression(args->inputFile, args->outputFile, args->cpuVersion);
+            flCompression(args->inputFile, args->outputFile, args->version);
         }
         else
         {
-            printf("rl compression\n");
+            printf("TODO: rl compression\n");
         }
     }
     else
     {
         if (args->algoKind == FL)
         {
-            flDecompression(args->inputFile, args->outputFile, args->cpuVersion);
+            flDecompression(args->inputFile, args->outputFile, args->version);
         }
         else
         {
-            printf("rl decompression\n");
+            printf("TODO: rl decompression\n");
         }
     }
-    delete args;
 
     return EXIT_SUCCESS;
 }

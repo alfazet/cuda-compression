@@ -22,8 +22,7 @@ def gen_test(size, rep_chance):
         f.write(output)
 
 
-def run_tests(n_tests, size, rep_chance, method, is_gpu):
-    binary = "../build/release/compress"
+def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
     device = "gpu" if is_gpu else "cpu"
     print(f"{'*' * 20} {method} [{device}] {'*' * 20}")
     for i in range(n_tests):
@@ -68,5 +67,5 @@ print(
     f"running {n_tests} tests (per method/device) with size = {size}, repetition chance = {rep_chance} ([Enter] to start)"
 )
 input()
-run_tests(n_tests, size, rep_chance, "fl", False)
-run_tests(n_tests, size, rep_chance, "fl", True)
+run_tests(binary, n_tests, size, rep_chance, "fl", False)
+run_tests(binary, n_tests, size, rep_chance, "fl", True)
