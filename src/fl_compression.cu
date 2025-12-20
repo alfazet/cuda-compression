@@ -60,11 +60,11 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
     // block <-> chunk, thread <-> byte
     byte curByte = data[tidGlobal];
     u8 blockBitDepth = 8;
-    while (blockBitDepth > 0 && __syncthreads_or(((byte)1 << (blockBitDepth - 1)) & curByte) == 0)
+    while (blockBitDepth > 0 && __syncthreads_or((1 << (blockBitDepth - 1)) & curByte) == 0)
     {
         blockBitDepth--;
     }
-    curByte <<= (8 - blockBitDepth);
+    curByte <<= 8 - blockBitDepth;
     if (tidInBlock == 0)
     {
         bitDepth[blockIdx.x] = blockBitDepth;
