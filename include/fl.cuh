@@ -24,7 +24,7 @@ inline Fl* flInit(Arena* cpuArena, u64 dataLen)
     fl->dataLen = dataLen;
     fl->nChunks = cdiv(dataLen, CHUNK_SIZE);
     fl->bitDepth = (u8*)arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(u8));
-    fl->chunks = (byte(*)[CHUNK_SIZE])arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(byte*));
+    fl->chunks = (byte(*)[CHUNK_SIZE])arenaCPUAlloc(cpuArena, fl->nChunks * sizeof(byte));
 
     return fl;
 }
@@ -62,6 +62,7 @@ inline Fl* flFromFile(const char* path, Arena* cpuArena)
         }
         u64 bitLen = fl->bitDepth[i] * len;
         u64 nBytes = cdiv(bitLen, 8UL);
+        fprintf(stderr, "i: %lu, len: %lu\n", i, len);
         if (fread(fl->chunks[i], sizeof(u8), nBytes, f) != nBytes)
         {
             ERR_AND_DIE("fread");

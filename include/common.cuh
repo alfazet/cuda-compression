@@ -33,15 +33,15 @@ inline byte* read_all(const char* path, u64* len)
         ERR_AND_DIE("fopen");
     }
     fseek(f, 0, SEEK_END);
-    u64 file_size = ftell(f);
-    *len = file_size;
+    u64 fileSize = ftell(f);
+    *len = fileSize;
     fseek(f, 0, SEEK_SET);
-    byte* content = new byte[file_size];
+    byte* content = new byte[fileSize];
     if (content == nullptr)
     {
         ERR_AND_DIE("new");
     }
-    if (fread(content, sizeof(byte), file_size, f) != file_size)
+    if (fread(content, sizeof(byte), fileSize, f) != fileSize)
     {
         ERR_AND_DIE("fread");
     }

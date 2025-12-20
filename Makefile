@@ -19,7 +19,7 @@ debug: $(OBJ_FILES)
 	mkdir -p build/debug
 	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(OBJ_FILES) -o build/debug/$(EXE)
 
-build/%.o: src/%.cu
+build/%.o: src/%.cu $(HEADER_FILES)
 	mkdir -p build
 	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(C_FLAGS) -c $< -o $@
 

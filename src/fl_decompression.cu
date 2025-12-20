@@ -93,5 +93,5 @@ void flDecompression(const char* inputFile, const char* outputFile, bool cpuVers
     }
     write_all(outputFile, decompressed, fl->dataLen);
     arenaCPUFree(arena);
-    delete[] decompressed;
+    // delete[] decompressed;
 }

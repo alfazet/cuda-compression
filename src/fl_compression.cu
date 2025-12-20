@@ -21,7 +21,7 @@ __global__ void flCompressionGPU(u64 dataLen, const byte* data, u8* bitDepth, by
     {
         bitDepth[blockId] = blockBitDepth;
     }
-    u64 bitLoc = blockBitDepth * tidInBlock;
+    u64 bitLoc = 1UL * blockBitDepth * tidInBlock;
     u64 byteLoc = (bitLoc >> 3); // loc = location
     u64 bitOffset = (bitLoc & 0b111);
     // in the pessimistic case (bit depth 1), 8 consecutive threads will want to modify the same byte
@@ -69,6 +69,7 @@ void flCompressionCPU(Fl* fl, const byte* data)
         }
         fl->bitDepth[i] = bitDepth;
 
+        fprintf(stderr, "---------------------------------- chunk: %lu, len: %lu\n", i, len);
         for (u64 j = 0; j < len; j++)
         {
             byte curByte = (data[i * CHUNK_SIZE + j] << (8 - bitDepth));
@@ -131,5 +132,5 @@ void flCompression(const char* inputFile, const char* outputFile, bool cpuVersio
     }
     flToFile(outputFile, fl);
     arenaCPUFree(cpuArena);
-    delete[] data;
+    // delete[] data;
 }
