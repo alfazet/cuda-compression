@@ -21,21 +21,22 @@ __global__ void flCompressionGPU(u64 dataLen, const byte* data, u8* bitDepth, by
     {
         bitDepth[blockId] = blockBitDepth;
     }
-
-    // TODO: rewrite
     u64 bitLoc = blockBitDepth * tidInBlock;
-    bool overflows = (bitLoc % 8);
-    for (u8 i = 0; i < 8; i++)
+    u64 byteLoc = (bitLoc >> 3); // loc = location
+    u64 bitOffset = (bitLoc & 0b111);
+    // in the pessimistic case (bit depth 1), 8 consecutive threads will want to modify the same byte
+    // so we have to separate them into 8 "turns" based on their id mod 8
+    for (u64 i = 0; i < 8; i++)
     {
-        __syncthreads();
-        if (tidInBlock % 8 == i)
+        if ((tidInBlock & 0b111) == i)
         {
-            chunks[blockId][bitLoc / 8] |= (curByte >> (bitLoc % 8));
-            if (overflows)
+            chunks[blockId][byteLoc] |= (curByte >> bitOffset);
+            if (bitOffset != 0)
             {
-                chunks[blockId][bitLoc / 8 + 1] |= (curByte << (8 - bitLoc % 8));
+                chunks[blockId][byteLoc + 1] |= (curByte << (8 - bitOffset));
             }
         }
+        __syncthreads();
     }
 }
 
@@ -70,17 +71,17 @@ void flCompressionCPU(Fl* fl, const byte* data)
 
         for (u64 j = 0; j < len; j++)
         {
-            byte thisByte = (data[i * CHUNK_SIZE + j] << (8 - bitDepth));
+            byte curByte = (data[i * CHUNK_SIZE + j] << (8 - bitDepth));
             u64 bitLoc = bitDepth * j;
             u64 byteLoc = (bitLoc >> 3); // loc = location
             u64 bitOffset = (bitLoc & 0b111);
             // place the relevant bits of this byte
             // starting at the (7 - bitOffset)-th bit of the byteLoc-th byte
-            fl->chunks[i][byteLoc] |= (thisByte >> bitOffset);
+            fl->chunks[i][byteLoc] |= (curByte >> bitOffset);
             // if any bits spill over to the next byte, place them there
             if (bitOffset != 0)
             {
-                fl->chunks[i][byteLoc + 1] |= (thisByte << (8 - bitOffset));
+                fl->chunks[i][byteLoc + 1] |= (curByte << (8 - bitOffset));
             }
         }
     }

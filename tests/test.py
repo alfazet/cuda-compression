@@ -1,4 +1,3 @@
-import os
 import random
 import subprocess
 import sys
@@ -57,6 +56,9 @@ n_tests = int(args[1]) if len(args) >= 2 else 100
 size = int(args[2]) if len(args) >= 3 else (1 << 12)  # number of bytes
 rep_chance = float(args[3]) if len(args) >= 4 else 0.1  # chance for a value to repeat
 
-print(f"running tests with size = {size}, repetition chance = {rep_chance}")
+print(
+    f"running {n_tests} tests (per method/device) with size = {size}, repetition chance = {rep_chance} ([Enter] to start)"
+)
+input()
 run_tests(n_tests, size, rep_chance, "fl", False)
 run_tests(n_tests, size, rep_chance, "fl", True)
