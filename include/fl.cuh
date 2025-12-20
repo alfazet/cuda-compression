@@ -29,40 +29,6 @@ inline Fl* flInit(Arena* cpuArena, u64 dataLen)
     return fl;
 }
 
-inline void flFreeGPU(Fl* dFl)
-{
-    // segfaults
-    // cudaErrCheck(cudaFree(dFl->bitDepth));
-    // cudaErrCheck(cudaFree(dFl->chunks));
-    cudaErrCheck(cudaFree(dFl));
-}
-
-inline void flCopyToGPU(Fl* dFl, Fl* hFl)
-{
-    u8* ptr1;
-    byte* ptr2;
-    cudaErrCheck(cudaMemcpy(&dFl->dataLen, &hFl->dataLen, sizeof(u64), cudaMemcpyHostToDevice));
-    cudaErrCheck(cudaMemcpy(&dFl->nChunks, &hFl->nChunks, sizeof(u64), cudaMemcpyHostToDevice));
-
-    u64 nChunks = hFl->nChunks;
-    cudaErrCheck(cudaMalloc(&ptr1, nChunks * sizeof(u8)));
-    cudaErrCheck(cudaMemcpy(&dFl->bitDepth, &ptr1, sizeof(u8*), cudaMemcpyHostToDevice));
-    cudaErrCheck(cudaMemcpy(ptr1, hFl->bitDepth, nChunks * sizeof(u8), cudaMemcpyHostToDevice));
-
-    cudaErrCheck(cudaMalloc(&ptr2, nChunks * CHUNK_SIZE * sizeof(byte)));
-    cudaErrCheck(cudaMemcpy(&dFl->chunks, &ptr2, sizeof(byte*), cudaMemcpyHostToDevice));
-    for (u64 i = 0; i < nChunks; i++)
-    {
-        cudaErrCheck(cudaMemcpy(ptr2 + i * CHUNK_SIZE * sizeof(byte), hFl->chunks[i], CHUNK_SIZE * sizeof(byte),
-                                cudaMemcpyHostToDevice));
-    }
-}
-
-inline void flCopyToCPU(Fl* hFl, Fl* dFl)
-{
-    //
-}
-
 /*
  *  FL data layout in memory:
  *  - length of uncompressed data (1 x u64)

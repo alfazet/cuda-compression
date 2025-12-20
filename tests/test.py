@@ -20,7 +20,7 @@ def gen_test(size, rep_chance):
 
 
 def run_tests(n_tests, size, rep_chance, method, is_gpu):
-    binary = "../build/debug/compress"
+    binary = "../build/release/compress"
     device = "gpu" if is_gpu else "cpu"
     print(f"{'*' * 20} {method} [{device}] {'*' * 20}")
     for i in range(n_tests):

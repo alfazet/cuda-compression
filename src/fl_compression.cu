@@ -1,6 +1,43 @@
 #include "fl.cuh"
 
-__global__ void flCompressionGPU(Fl* fl, const byte* data);
+__global__ void flCompressionGPU(u64 dataLen, const byte* data, u8* bitDepth, byte (*chunks)[CHUNK_SIZE])
+{
+    u64 tidInBlock = threadIdx.x, blockId = blockIdx.x;
+    u64 tidGlobal = blockId * blockDim.x + tidInBlock;
+    if (tidGlobal >= dataLen)
+    {
+        return;
+    }
+
+    // block <-> chunk, thread <-> byte
+    byte curByte = data[tidGlobal];
+    u8 blockBitDepth = 8;
+    while (blockBitDepth > 0 && __syncthreads_or(((byte)1 << (blockBitDepth - 1)) & curByte) == 0)
+    {
+        blockBitDepth--;
+    }
+    curByte <<= (8 - blockBitDepth);
+    if (tidInBlock == 0)
+    {
+        bitDepth[blockId] = blockBitDepth;
+    }
+
+    // TODO: rewrite
+    u64 bitLoc = blockBitDepth * tidInBlock;
+    bool overflows = (bitLoc % 8);
+    for (u8 i = 0; i < 8; i++)
+    {
+        __syncthreads();
+        if (tidInBlock % 8 == i)
+        {
+            chunks[blockId][bitLoc / 8] |= (curByte >> (bitLoc % 8));
+            if (overflows)
+            {
+                chunks[blockId][bitLoc / 8 + 1] |= (curByte << (8 - bitLoc % 8));
+            }
+        }
+    }
+}
 
 void flCompressionCPU(Fl* fl, const byte* data)
 {
@@ -17,11 +54,11 @@ void flCompressionCPU(Fl* fl, const byte* data)
         u8 bitDepth = 0;
         for (u64 j = 0; j < len; j++)
         {
-            byte thisByte = data[i * CHUNK_SIZE + j];
+            byte curByte = data[i * CHUNK_SIZE + j];
             u8 bitDepthHere = 0;
             for (int b = 7; b >= 0; b--)
             {
-                if (((byte)1 << b) & thisByte)
+                if (((byte)1 << b) & curByte)
                 {
                     bitDepthHere = b + 1;
                     break;
@@ -61,18 +98,35 @@ void flCompression(const char* inputFile, const char* outputFile, bool cpuVersio
     }
     else
     {
-        Fl* dFl;
-        cudaErrCheck(cudaMalloc(&dFl, sizeof(Fl)));
-        flCopyToGPU(dFl, fl);
-
         byte* dData;
         cudaErrCheck(cudaMalloc(&dData, dataLen * sizeof(byte)));
         cudaErrCheck(cudaMemcpy(dData, data, dataLen * sizeof(byte), cudaMemcpyHostToDevice));
-        // flCompressionGPU();
-        // copy Fl from GPU to CPU
-        // fl = flCopyToCPU(dFl);
+
+        // CPU -> GPU
+        u8* dBitDepth;
+        cudaErrCheck(cudaMalloc(&dBitDepth, fl->nChunks * sizeof(u8)));
+        cudaErrCheck(cudaMemcpy(dBitDepth, fl->bitDepth, fl->nChunks * sizeof(u8), cudaMemcpyHostToDevice));
+        byte (*dChunks)[CHUNK_SIZE];
+        cudaErrCheck(cudaMalloc(&dChunks, fl->nChunks * CHUNK_SIZE * sizeof(byte)));
+        for (u64 i = 0; i < fl->nChunks; i++)
+        {
+            cudaErrCheck(cudaMemcpy(dChunks + i, fl->chunks[i], CHUNK_SIZE * sizeof(byte),
+                                    cudaMemcpyHostToDevice));
+        }
+
+        flCompressionGPU<<<fl->nChunks, CHUNK_SIZE>>>(dataLen, dData, dBitDepth, dChunks);
+
+        // GPU -> CPU
+        cudaErrCheck(cudaMemcpy(fl->bitDepth, dBitDepth, fl->nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
+        for (u64 i = 0; i < fl->nChunks; i++)
+        {
+            cudaErrCheck(cudaMemcpy(fl->chunks[i], dChunks + i, CHUNK_SIZE * sizeof(byte),
+                                    cudaMemcpyDeviceToHost));
+        }
+
         cudaErrCheck(cudaFree(dData));
-        flFreeGPU(dFl);
+        cudaErrCheck(cudaFree(dBitDepth));
+        cudaErrCheck(cudaFree(dChunks));
     }
     flToFile(outputFile, fl);
     arenaCPUFree(cpuArena);
