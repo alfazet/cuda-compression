@@ -1,7 +1,7 @@
 #include "fl.cuh"
 #include "timer.cuh"
 
-void flCompressionCPU(Fl& fl, const std::vector<byte>& data)
+void flCompressionCPU(const std::vector<byte>& data, Fl& fl)
 {
     for (u64 i = 0; i < fl.nChunks; i++)
     {
@@ -20,7 +20,7 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& data)
             u8 bitDepthHere = 0;
             for (int b = 7; b >= 0; b--)
             {
-                if ((1 << b) & curByte)
+                if ((0b1 << b) & curByte)
                 {
                     bitDepthHere = b + 1;
                     break;
@@ -49,7 +49,7 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& data)
 
 
 // takes "flattened" chunks - chunk 0 is [0, CHUNK_SIZE), chunk 1 is [CHUNK_SIZE, 2 * CHUNK_SIZE), ...
-__global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, byte* chunks, u64 nChunks)
+__global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
     u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
@@ -60,7 +60,7 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
 
     byte curByte = data[tidGlobal];
     u8 blockBitDepth = 8;
-    while (blockBitDepth > 0 && __syncthreads_or((1 << (blockBitDepth - 1)) & curByte) == 0)
+    while (blockBitDepth > 0 && __syncthreads_or((0b1 << (blockBitDepth - 1)) & curByte) == 0)
     {
         blockBitDepth--;
     }
@@ -73,19 +73,24 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
     u64 byteLoc = bitLoc >> 3;
     u64 bitOffset = bitLoc & 0b111;
     u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
-    // in the pessimistic case (bit depth 1), 8 consecutive threads will want to modify the same byte
-    // so we have to separate them into 8 "turns" based on their id mod 8
-    for (u64 i = 0; i < 8; i++)
+
+    // separate "odd" and "even" threads to avoid write conflicts
+    if ((idx & 0b1) == 0)
     {
-        if ((tidInBlock & 0b111) == i)
+        chunks[idx] |= curByte >> bitOffset;
+        if (bitOffset != 0)
         {
-            chunks[idx] |= curByte >> bitOffset;
-            if (bitOffset != 0)
-            {
-                chunks[idx + 1] |= curByte << (8 - bitOffset);
-            }
+            chunks[idx + 1] |= curByte << (8 - bitOffset);
         }
-        __syncthreads();
+    }
+    __syncthreads();
+    if ((idx & 0b1) == 1)
+    {
+        chunks[idx] |= curByte >> bitOffset;
+        if (bitOffset != 0)
+        {
+            chunks[idx + 1] |= curByte << (8 - bitOffset);
+        }
     }
 }
 
@@ -104,7 +109,7 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
     case CPU:
     {
         timer.start();
-        flCompressionCPU(fl, data);
+        flCompressionCPU(data, fl);
         timer.stop();
         printf("%s\n", timer.formattedResult("[CPU] compression function").c_str());
         break;
@@ -124,7 +129,7 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
         printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
 
         timerGPU.start();
-        flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks, fl.nChunks);
+        flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
         timerGPU.stop();
         printf("%s\n", timer.formattedResult("[GPU] compression kernel").c_str());
 

@@ -80,6 +80,7 @@ int main(int argc, char** argv)
         ERR_AND_DIE(USAGE_STR);
     }
 
+    CUDA_ERR_CHECK(cudaSetDevice(0));
     if (args->opKind == Compress)
     {
         if (args->algoKind == FL)

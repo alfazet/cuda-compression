@@ -1,3 +1,4 @@
 .idea/
 .ruff_cache/
 build/
+test_data/
