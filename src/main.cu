@@ -72,13 +72,12 @@ std::optional<Args> parseArgs(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-    // TODO: time taken for each stage - reading the input file, computing, ...
     // TODO: RL
 
     std::optional<Args> args = parseArgs(argc, argv);
     if (!args.has_value())
     {
-        ERR_AND_DIE("usage: compress <operation> <method> <input_file> <output_file> [cpu (optional)]");
+        ERR_AND_DIE(USAGE_STR);
     }
 
     if (args->opKind == Compress)

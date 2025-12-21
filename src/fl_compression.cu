@@ -1,4 +1,5 @@
 #include "fl.cuh"
+#include "timer.cuh"
 
 void flCompressionCPU(Fl& fl, const std::vector<byte>& data)
 {
@@ -57,7 +58,6 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
         return;
     }
 
-    // block <-> chunk, thread <-> byte
     byte curByte = data[tidGlobal];
     u8 blockBitDepth = 8;
     while (blockBitDepth > 0 && __syncthreads_or((1 << (blockBitDepth - 1)) & curByte) == 0)
@@ -91,40 +91,61 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
 
 void flCompression(const std::string& inputFile, const std::string& outputFile, Version version)
 {
+    TimerCPU timer;
+    timer.start();
     std::vector<byte> data = readDataFile(inputFile);
+    timer.stop();
+    printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
+
     u64 dataLen = data.size();
     Fl fl(dataLen);
     switch (version)
     {
     case CPU:
     {
+        timer.start();
         flCompressionCPU(fl, data);
+        timer.stop();
+        printf("%s\n", timer.formattedResult("[CPU] compression function").c_str());
         break;
     }
     case GPU:
     {
+        TimerGPU timerGPU;
         byte* dData;
+        timerGPU.start();
         CUDA_ERR_CHECK(cudaMalloc(&dData, dataLen * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMemcpy(dData, data.data(), dataLen * sizeof(byte), cudaMemcpyHostToDevice));
         u8* dBitDepth;
         CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
         byte* dChunks;
         CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
 
+        timerGPU.start();
         flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks, fl.nChunks);
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] compression kernel").c_str());
 
+        timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
         for (u64 i = 0; i < fl.nChunks; i++)
         {
             CUDA_ERR_CHECK(cudaMemcpy(fl.chunks[i].data(), dChunks + i * CHUNK_SIZE, CHUNK_SIZE * sizeof(byte),
                 cudaMemcpyDeviceToHost));
         }
-
         CUDA_ERR_CHECK(cudaFree(dData));
         CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }
+
+    timer.start();
     flToFile(outputFile, fl);
+    timer.stop();
+    printf("%s\n", timer.formattedResult("[CPU] writing the output file").c_str());
 }

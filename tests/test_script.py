@@ -1,6 +1,6 @@
-'''
+"""
 A script to test the program's correctness on randomly generated data
-'''
+"""
 
 import random
 import subprocess
@@ -36,7 +36,8 @@ def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
                 "/tmp/raw",
                 "/tmp/compressed",
                 device,
-            ]
+            ],
+            stdout=subprocess.DEVNULL,
         )
         subprocess.call(
             [
@@ -46,7 +47,8 @@ def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
                 "/tmp/compressed",
                 "/tmp/decompressed",
                 device,
-            ]
+            ],
+            stdout=subprocess.DEVNULL,
         )
         if subprocess.call(["diff", "/tmp/raw", "/tmp/decompressed"]) != 0:
             print("FAIL")

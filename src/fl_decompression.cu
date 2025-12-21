@@ -1,4 +1,5 @@
 #include "fl.cuh"
+#include "timer.cuh"
 
 void flDecompressionCPU(const Fl& fl, std::vector<byte>& decompressed)
 {
@@ -60,18 +61,28 @@ __global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, 
 
 void flDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
+    TimerCPU timer;
+    timer.start();
     Fl fl = flFromFile(inputPath);
     std::vector<byte> data(fl.dataLen);
+    timer.stop();
+    printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
+
     switch (version)
     {
     case CPU:
     {
+        timer.start();
         flDecompressionCPU(fl, data);
+        timer.stop();
+        printf("%s\n", timer.formattedResult("[CPU] decompression function").c_str());
         break;
     }
     case GPU:
     {
+        TimerGPU timerGPU;
         byte* dData;
+        timerGPU.start();
         CUDA_ERR_CHECK(cudaMalloc(&dData, fl.dataLen * sizeof(byte)));
         u8* dBitDepth;
         CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
@@ -83,16 +94,27 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
             CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
                 cudaMemcpyHostToDevice));
         }
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
 
+        timerGPU.start();
         flDecompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] decompression kernel").c_str());
 
+        timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(data.data(), dData, fl.dataLen * sizeof(byte), cudaMemcpyDeviceToHost));
-
         CUDA_ERR_CHECK(cudaFree(dData));
         CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }
+
+    timer.start();
     writeDataFile(outputPath, data);
+    timer.stop();
+    printf("%s\n", timer.formattedResult("[CPU] writing the output file").c_str());
 }

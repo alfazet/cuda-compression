@@ -1,29 +1,33 @@
-FLAGS_COMMON=-Wno-deprecated-gpu-targets
-FLAGS_DEBUG=-G -g
-FLAGS_RELEASE=-O3
+COMMON_FLAGS=-Wno-deprecated-gpu-targets
+FLAGS=
+BUILD_DIR=build
+DEBUG?=1
+ifeq ($(DEBUG),1)
+	FLAGS:=$(FLAGS) -g -G -O0
+	BUILD_DIR:=$(BUILD_DIR)/debug
+else
+	FLAGS:=$(FLAGS) -O3
+	BUILD_DIR:=$(BUILD_DIR)/release
+endif
+
 EXE=compress
 CUDA_FILES=$(wildcard src/*.cu)
 HEADER_FILES=$(wildcard include/*.cuh)
-OBJ_FILES=$(patsubst src/%.cu,build/%.o,$(CUDA_FILES))
+OBJS=$(patsubst src/%.cu,$(BUILD_DIR)/%.o,$(CUDA_FILES))
 
-# this variable name makes no sense, but it's needed to make CLion detect the include path properly
 C_FLAGS=-Iinclude
 
-.PHONY: release debug all clean
+.PHONY: all clean
 
-release: $(OBJ_FILES)
-	mkdir -p build/release
-	nvcc $(FLAGS_COMMON) $(FLAGS_RELEASE) $(OBJ_FILES) -o build/release/$(EXE)
+all: $(EXE)
 
-debug: $(OBJ_FILES)
-	mkdir -p build/debug
-	nvcc $(FLAGS_COMMON) $(FLAGS_DEBUG) $(OBJ_FILES) -o build/debug/$(EXE)
+$(EXE): $(OBJS)
+	mkdir -p $(BUILD_DIR)
+	nvcc $(COMMON_FLAGS) $(OBJS) -o $(BUILD_DIR)/$(EXE)
 
-build/%.o: src/%.cu $(HEADER_FILES)
-	mkdir -p build
-	nvcc $(FLAGS_COMMON) $(C_FLAGS) -c $< -o $@
-
-all: debug release
+$(BUILD_DIR)/%.o: src/%.cu $(HEADER_FILES)
+	mkdir -p $(BUILD_DIR)
+	nvcc $(COMMON_FLAGS) $(FLAGS) $(C_FLAGS) -c $< -o $@
 
 clean:
 	rm -rf build/
