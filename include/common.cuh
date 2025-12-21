@@ -47,6 +47,20 @@ constexpr char const* USAGE_STR =
         } \
     } while (0)
 
+#define FREAD_CHECK(ptr, size, n, stream) \
+    do { \
+        if (fread(ptr, size, n, stream) != n) { \
+            ERR_AND_DIE("fread"); \
+        } \
+    } while (0)
+
+#define FWRITE_CHECK(ptr, size, n, stream) \
+    do { \
+        if (fwrite(ptr, size, n, stream) != n) { \
+            ERR_AND_DIE("fwrite"); \
+        } \
+    } while (0)
+
 template <typename T>
 T ceilDiv(T a, T b)
 {

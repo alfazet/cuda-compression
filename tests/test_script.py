@@ -69,6 +69,6 @@ print(
     f"running {n_tests} tests (per method/device) with size = {size}, repetition chance = {rep_chance} ([Enter] to start)"
 )
 input()
-# run_tests(binary, n_tests, size, rep_chance, "fl", False)
-# run_tests(binary, n_tests, size, rep_chance, "fl", True)
+run_tests(binary, n_tests, size, rep_chance, "fl", False)
+run_tests(binary, n_tests, size, rep_chance, "fl", True)
 run_tests(binary, n_tests, size, rep_chance, "rl", False)

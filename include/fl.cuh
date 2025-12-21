@@ -41,16 +41,10 @@ inline Fl flFromFile(const std::string& path)
         ERR_AND_DIE("fopen");
     }
     u64 dataLen;
-    if (fread(&dataLen, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fread");
-    }
+    FREAD_CHECK(&dataLen, sizeof(u64), 1, f);
 
     Fl fl(dataLen);
-    if (fread(fl.bitDepth.data(), sizeof(u8), fl.nChunks, f) != fl.nChunks)
-    {
-        ERR_AND_DIE("fread");
-    }
+    FREAD_CHECK(fl.bitDepth.data(), sizeof(u8), fl.nChunks, f);
     for (u64 i = 0; i < fl.nChunks; i++)
     {
         u64 len = CHUNK_SIZE;
@@ -59,10 +53,7 @@ inline Fl flFromFile(const std::string& path)
             len = fl.dataLen % CHUNK_SIZE;
         }
         u64 nBytes = ceilDiv(fl.bitDepth[i] * len, 8UL);
-        if (fread(fl.chunks[i].data(), sizeof(u8), nBytes, f) != nBytes)
-        {
-            ERR_AND_DIE("fread");
-        }
+        FREAD_CHECK(fl.chunks[i].data(), sizeof(u8), nBytes, f);
     }
 
     return fl;
@@ -75,14 +66,8 @@ inline void flToFile(const std::string& path, const Fl& fl)
     {
         ERR_AND_DIE("fopen");
     }
-    if (fwrite(&fl.dataLen, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fwrite");
-    }
-    if (fwrite(fl.bitDepth.data(), sizeof(u8), fl.nChunks, f) != fl.nChunks)
-    {
-        ERR_AND_DIE("fwrite");
-    }
+    FWRITE_CHECK(&fl.dataLen, sizeof(u64), 1, f);
+    FWRITE_CHECK(fl.bitDepth.data(), sizeof(u8), fl.nChunks, f);
     for (u64 i = 0; i < fl.nChunks; i++)
     {
         u64 len = CHUNK_SIZE;
@@ -91,10 +76,7 @@ inline void flToFile(const std::string& path, const Fl& fl)
             len = fl.dataLen % CHUNK_SIZE;
         }
         u64 nBytes = ceilDiv(fl.bitDepth[i] * len, 8UL);
-        if (fwrite(fl.chunks[i].data(), sizeof(u8), nBytes, f) != nBytes)
-        {
-            ERR_AND_DIE("fwrite");
-        }
+        FWRITE_CHECK(fl.chunks[i].data(), sizeof(u8), nBytes, f);
     }
     fclose(f);
 }

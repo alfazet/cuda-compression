@@ -28,6 +28,11 @@ void rlCompressionCPU(const std::vector<byte>& data, Rl& rl)
     rl.nRuns = rl.runs.size();
 }
 
+__global__ void rlCompressionGPU(const byte* data, u64 dataLen, u32* runs, byte* values, u64* nRuns)
+{
+    //
+}
+
 void rlCompression(const std::string& inputFile, const std::string& outputFile, Version version)
 {
     TimerCPU timer;

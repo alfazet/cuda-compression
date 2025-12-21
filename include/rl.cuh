@@ -47,36 +47,21 @@ inline Rl rlFromFile(const std::string& path)
         ERR_AND_DIE("fopen");
     }
     u64 dataLen, nRuns;
-    if (fread(&dataLen, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fread");
-    }
-    if (fread(&nRuns, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fread");
-    }
+    FREAD_CHECK(&dataLen, sizeof(u64), 1, f);
+    FREAD_CHECK(&nRuns, sizeof(u64), 1, f);
 
     Rl rl(dataLen, nRuns);
-    if (fread(rl.values.data(), sizeof(byte), rl.nRuns, f) != rl.nRuns)
-    {
-        ERR_AND_DIE("fread");
-    }
+    FREAD_CHECK(rl.values.data(), sizeof(byte), rl.nRuns, f);
     for (u64 i = 0; i < rl.nRuns; i++)
     {
         u8 len;
-        if (fread(&len, sizeof(u8), 1, f) != 1)
-        {
-            ERR_AND_DIE("fread");
-        }
+        FREAD_CHECK(&len, sizeof(u8), 1, f);
         // TODO: (maybe) reserve more special bytes to handle 8-byte lengths
         if (len == 0x00)
         {
             // read the next 4 bytes because they encode the actual length of this run
             u32 actualLen;
-            if (fread(&actualLen, sizeof(u32), 1, f) != 1)
-            {
-                ERR_AND_DIE("fread");
-            }
+            FREAD_CHECK(&actualLen, sizeof(u32), 1, f);
             rl.runs[i] = actualLen;
         }
         else
@@ -96,18 +81,9 @@ inline void rlToFile(const std::string& path, const Rl& rl)
     {
         ERR_AND_DIE("fopen");
     }
-    if (fwrite(&rl.dataLen, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fwrite");
-    }
-    if (fwrite(&rl.nRuns, sizeof(u64), 1, f) != 1)
-    {
-        ERR_AND_DIE("fwrite");
-    }
-    if (fwrite(rl.values.data(), sizeof(byte), rl.nRuns, f) != rl.nRuns)
-    {
-        ERR_AND_DIE("fwrite");
-    }
+    FWRITE_CHECK(&rl.dataLen, sizeof(u64), 1, f);
+    FWRITE_CHECK(&rl.nRuns, sizeof(u64), 1, f);
+    FWRITE_CHECK(rl.values.data(), sizeof(byte), rl.nRuns, f);
     for (u64 i = 0; i < rl.nRuns; i++)
     {
         u32 len = rl.runs[i];
@@ -116,18 +92,12 @@ inline void rlToFile(const std::string& path, const Rl& rl)
         if (len <= 255)
         {
             u8 shortLen = (u8)len;
-            if (fwrite(&shortLen, sizeof(u8), 1, f) != 1)
-            {
-                ERR_AND_DIE("fwrite");
-            }
+            FWRITE_CHECK(&shortLen, sizeof(u8), 1, f);
         }
         else
         {
             fputc(0x00, f);
-            if (fwrite(&len, sizeof(u32), 1, f) != 1)
-            {
-                ERR_AND_DIE("fwrite");
-            }
+            FWRITE_CHECK(&len, sizeof(u32), 1, f);
         }
     }
 }

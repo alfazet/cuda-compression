@@ -14,6 +14,11 @@ void rlDecompressionCPU(const Rl& rl, std::vector<byte>& data)
     }
 }
 
+__global__ void rlDecompressionGPU(byte* data, u64 dataLen, const u32* runs, const byte* values, u64 nRuns)
+{
+    //
+}
+
 void rlDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
     TimerCPU timer;
