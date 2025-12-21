@@ -1,7 +1,7 @@
 #include "fl.cuh"
 #include "timer.cuh"
 
-void flDecompressionCPU(const Fl& fl, std::vector<byte>& decompressed)
+void flDecompressionCPU(const Fl& fl, std::vector<byte>& data)
 {
     for (u64 i = 0; i < fl.nChunks; i++)
     {
@@ -26,7 +26,7 @@ void flDecompressionCPU(const Fl& fl, std::vector<byte>& decompressed)
                 mask = (0xff << (8 - bitOffset)) << (8 - bitDepth);
                 decoded |= ((fl.chunks[i][byteLoc + 1] & mask) >> (8 - bitOffset)) >> (8 - bitDepth);
             }
-            decompressed[i * CHUNK_SIZE + j] = decoded;
+            data[i * CHUNK_SIZE + j] = decoded;
         }
     }
 }

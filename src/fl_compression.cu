@@ -111,7 +111,7 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
         timer.start();
         flCompressionCPU(data, fl);
         timer.stop();
-        printf("%s\n", timer.formattedResult("[CPU] compression function").c_str());
+        printf("%s\n", timer.formattedResult("[CPU] FL compression function").c_str());
         break;
     }
     case GPU:
@@ -131,7 +131,7 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
         timerGPU.start();
         flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] compression kernel").c_str());
+        printf("%s\n", timer.formattedResult("[GPU] FL compression kernel").c_str());
 
         timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));

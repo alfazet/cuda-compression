@@ -1,5 +1,6 @@
 #include "common.cuh"
 #include "fl.cuh"
+#include "rl.cuh"
 
 enum OpKind
 {
@@ -72,7 +73,7 @@ std::optional<Args> parseArgs(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-    // TODO: RL
+    // TODO: RL, what happens to empty files?
 
     std::optional<Args> args = parseArgs(argc, argv);
     if (!args.has_value())
@@ -89,7 +90,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            printf("TODO: rl compression\n");
+            rlCompression(args->inputFile, args->outputFile, args->version);
         }
     }
     else
@@ -100,7 +101,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            printf("TODO: rl decompression\n");
+            rlDecompression(args->inputFile, args->outputFile, args->version);
         }
     }
 
