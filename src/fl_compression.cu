@@ -133,12 +133,12 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
         byte* dChunks;
         CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
 
         timerGPU.start();
         flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] FL compression kernel").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] FL compression kernel").c_str());
 
         timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
@@ -151,7 +151,7 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
         CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }

@@ -108,7 +108,7 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
         auto dDiff = thrust::device_vector<u32>(dataLen);
         auto dScannedDiff = thrust::device_vector<u32>(dataLen);
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
 
         timerGPU.start();
         dDiff[0] = 1;
@@ -127,7 +127,7 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
         computeRuns<<<gridDim, BLOCK_SIZE>>>(dCompactedDiff, thrust::raw_pointer_cast(dData.data()), dValues, dRuns,
                                              dNRuns);
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] RL compression kernels and Thrust functions").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] RL compression kernels and Thrust functions").c_str());
 
         timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(&rl.nRuns, dNRuns, sizeof(u64), cudaMemcpyDeviceToHost));
@@ -140,7 +140,7 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
         CUDA_ERR_CHECK(cudaFree(dValues));
         CUDA_ERR_CHECK(cudaFree(dCompactedDiff));
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }

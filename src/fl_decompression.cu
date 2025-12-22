@@ -63,7 +63,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
 {
     TimerCPU timer;
     timer.start();
-    Fl fl = flFromFile(inputPath);
+    const Fl fl = flFromFile(inputPath);
     std::vector<byte> data(fl.dataLen);
     timer.stop();
     printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
@@ -81,8 +81,8 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     case GPU:
     {
         TimerGPU timerGPU;
-        byte* dData;
         timerGPU.start();
+        byte* dData;
         CUDA_ERR_CHECK(cudaMalloc(&dData, fl.dataLen * sizeof(byte)));
         u8* dBitDepth;
         CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
@@ -95,12 +95,12 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
                 cudaMemcpyHostToDevice));
         }
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
 
         timerGPU.start();
         flDecompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] decompression kernel").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] decompression kernel").c_str());
 
         timerGPU.start();
         CUDA_ERR_CHECK(cudaMemcpy(data.data(), dData, fl.dataLen * sizeof(byte), cudaMemcpyDeviceToHost));
@@ -108,7 +108,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
         timerGPU.stop();
-        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
+        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }

@@ -9,6 +9,7 @@
 #include <thrust/transform.h>
 
 constexpr u64 BLOCK_SIZE = 1024;
+constexpr byte MARKER = 0x00;
 
 struct Rl
 {
@@ -64,7 +65,7 @@ inline Rl rlFromFile(const std::string& path)
         u8 len;
         FREAD_CHECK(&len, sizeof(u8), 1, f);
         // TODO: (maybe) reserve more special bytes to handle 8-byte lengths
-        if (len == 0x00)
+        if (len == MARKER)
         {
             // read the next 4 bytes because they encode the actual length of this run
             u32 actualLen;
@@ -74,7 +75,7 @@ inline Rl rlFromFile(const std::string& path)
         else
         {
             // this single byte is equal to the length
-            rl.runs[i] = (u32)len;
+            rl.runs[i] = static_cast<u32>(len);
         }
     }
 
@@ -98,12 +99,12 @@ inline void rlToFile(const std::string& path, const Rl& rl)
         // the "special" byte 0x00 won't be written here
         if (len <= 255)
         {
-            u8 shortLen = (u8)len;
+            u8 shortLen = static_cast<u8>(len);
             FWRITE_CHECK(&shortLen, sizeof(u8), 1, f);
         }
         else
         {
-            fputc(0x00, f);
+            fputc(MARKER, f);
             FWRITE_CHECK(&len, sizeof(u32), 1, f);
         }
     }
