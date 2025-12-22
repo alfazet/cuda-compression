@@ -28,9 +28,41 @@ void rlCompressionCPU(const std::vector<byte>& data, Rl& rl)
     rl.nRuns = rl.runs.size();
 }
 
-__global__ void rlCompressionGPU(const byte* data, u64 dataLen, u32* runs, byte* values, u64* nRuns)
+__global__ void computeCompactedDiff(const u32* scannedDiff, u64 dataLen, u32* compactedDiff, u64* nRuns)
 {
-    //
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= dataLen)
+    {
+        return;
+    }
+    if (tid == dataLen - 1)
+    {
+        compactedDiff[scannedDiff[tid]] = tid + 1;
+        *nRuns = scannedDiff[tid];
+    }
+
+    if (tid == 0)
+    {
+        compactedDiff[0] = 0;
+    }
+    else if (scannedDiff[tid] != scannedDiff[tid - 1])
+    {
+        compactedDiff[scannedDiff[tid] - 1] = tid;
+    }
+}
+
+__global__ void computeRuns(const u32* compactedDiff, const byte* data, byte* values, u32* runs, u64 nRuns)
+{
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= nRuns)
+    {
+        return;
+    }
+
+    u32 l = compactedDiff[tid];
+    u32 r = compactedDiff[tid + 1];
+    values[tid] = data[l];
+    runs[tid] = r - l;
 }
 
 void rlCompression(const std::string& inputFile, const std::string& outputFile, Version version)
@@ -55,6 +87,46 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
     }
     case GPU:
     {
+        // TODO: add timers
+        u32* dCompactedDiff;
+        CUDA_ERR_CHECK(cudaMalloc(&dCompactedDiff, (dataLen + 1) * sizeof(u32)));
+        u64* dNRuns;
+        CUDA_ERR_CHECK(cudaMalloc(&dNRuns, sizeof(u64)));
+
+        auto dData = thrust::device_vector<byte>(data.begin(), data.end());
+        auto dDiff = thrust::device_vector<u32>(dataLen);
+        dDiff[0] = 1;
+        thrust::transform(thrust::device, dData.begin() + 1, dData.begin() + static_cast<long>(dataLen), dData.begin(),
+                          dDiff.begin() + 1,
+                          [] __device__(const int x, const int y)
+                          {
+                              return x == y ? 0 : 1;
+                          });
+        auto dScannedDiff = thrust::device_vector<u32>(dataLen);
+        thrust::inclusive_scan(thrust::device, dDiff.begin(), dDiff.end(), dScannedDiff.begin());
+
+        u64 gridDim = ceilDiv(dataLen, BLOCK_SIZE);
+        computeCompactedDiff<<<gridDim, BLOCK_SIZE>>>(
+            thrust::raw_pointer_cast(dScannedDiff.data()), dataLen, dCompactedDiff, dNRuns);
+        u64 nRuns;
+        CUDA_ERR_CHECK(cudaMemcpy(&nRuns, dNRuns, sizeof(u64), cudaMemcpyDeviceToHost));
+
+        byte* dValues;
+        CUDA_ERR_CHECK(cudaMalloc(&dValues, nRuns * sizeof(byte)));
+        u32* dRuns;
+        CUDA_ERR_CHECK(cudaMalloc(&dRuns, nRuns * sizeof(u32)));
+        computeRuns<<<gridDim, BLOCK_SIZE>>>(dCompactedDiff, thrust::raw_pointer_cast(dData.data()), dValues, dRuns,
+                                             nRuns);
+
+        rl.nRuns = nRuns;
+        rl.values.resize(nRuns);
+        rl.runs.resize(nRuns);
+        CUDA_ERR_CHECK(cudaMemcpy(rl.values.data(), dValues, nRuns * sizeof(byte), cudaMemcpyDeviceToHost));
+        CUDA_ERR_CHECK(cudaMemcpy(rl.runs.data(), dRuns, nRuns * sizeof(u32), cudaMemcpyDeviceToHost));
+        CUDA_ERR_CHECK(cudaFree(dRuns));
+        CUDA_ERR_CHECK(cudaFree(dValues));
+        CUDA_ERR_CHECK(cudaFree(dNRuns));
+        CUDA_ERR_CHECK(cudaFree(dCompactedDiff));
         break;
     }
     }

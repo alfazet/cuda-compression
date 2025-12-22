@@ -3,6 +3,13 @@
 
 #include "common.cuh"
 
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
+#include <thrust/transform.h>
+
+constexpr u64 BLOCK_SIZE = 1024;
+
 struct Rl
 {
     u64 dataLen; // length of raw data (before compression)

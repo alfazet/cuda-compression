@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <cstddef>
 #include <array>
-#include <iostream>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -77,10 +76,7 @@ inline std::vector<byte> readDataFile(const std::string& path)
     u64 fileSize = ftell(f);
     fseek(f, 0, SEEK_SET);
     std::vector<byte> content(fileSize);
-    if (fread(content.data(), sizeof(byte), fileSize, f) != fileSize)
-    {
-        ERR_AND_DIE("fread");
-    }
+    FREAD_CHECK(content.data(), sizeof(byte), fileSize, f);
     fclose(f);
 
     return content;
@@ -94,10 +90,7 @@ inline void writeDataFile(const std::string& path, const std::vector<byte>& data
         ERR_AND_DIE("fopen");
     }
     u64 len = data.size();
-    if (fwrite(data.data(), sizeof(byte), len, f) != len)
-    {
-        ERR_AND_DIE("fwrite");
-    }
+    FWRITE_CHECK(data.data(), sizeof(byte), len, f);
     fclose(f);
 }
 

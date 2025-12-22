@@ -1,4 +1,4 @@
-COMMON_FLAGS=-Wno-deprecated-gpu-targets
+COMMON_FLAGS=-Wno-deprecated-gpu-targets --extended-lambda
 FLAGS=
 BUILD_DIR=build
 DEBUG?=1
