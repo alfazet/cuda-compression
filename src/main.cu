@@ -72,7 +72,7 @@ int parseArgs(int argc, char** argv, Args* args)
 
 int main(int argc, char** argv)
 {
-    // TODO: RL, what happens to empty files?
+    // TODO: RL decompression GPU
 
     Args args;
     if (parseArgs(argc, argv, &args) != 0)

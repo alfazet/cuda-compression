@@ -103,6 +103,13 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
     printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
 
     u64 dataLen = data.size();
+    if (dataLen == 0)
+    {
+        printf("Empty input file, no compression required\n");
+        writeDataFile(outputFile, {});
+        return;
+    }
+
     Fl fl(dataLen);
     switch (version)
     {
@@ -117,8 +124,8 @@ void flCompression(const std::string& inputFile, const std::string& outputFile, 
     case GPU:
     {
         TimerGPU timerGPU;
-        byte* dData;
         timerGPU.start();
+        byte* dData;
         CUDA_ERR_CHECK(cudaMalloc(&dData, dataLen * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMemcpy(dData, data.data(), dataLen * sizeof(byte), cudaMemcpyHostToDevice));
         u8* dBitDepth;

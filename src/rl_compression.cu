@@ -51,10 +51,10 @@ __global__ void computeCompactedDiff(const u32* scannedDiff, u64 dataLen, u32* c
     }
 }
 
-__global__ void computeRuns(const u32* compactedDiff, const byte* data, byte* values, u32* runs, u64 nRuns)
+__global__ void computeRuns(const u32* compactedDiff, const byte* data, byte* values, u32* runs, const u64* nRuns)
 {
     u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= nRuns)
+    if (tid >= *nRuns)
     {
         return;
     }
@@ -74,6 +74,13 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
     printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
 
     u64 dataLen = data.size();
+    if (dataLen == 0)
+    {
+        printf("Empty input file, no compression required\n");
+        writeDataFile(outputFile, {});
+        return;
+    }
+
     Rl rl(dataLen);
     switch (version)
     {
@@ -87,14 +94,23 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
     }
     case GPU:
     {
-        // TODO: add timers
+        TimerGPU timerGPU;
+        timerGPU.start();
         u32* dCompactedDiff;
         CUDA_ERR_CHECK(cudaMalloc(&dCompactedDiff, (dataLen + 1) * sizeof(u32)));
+        byte* dValues;
+        CUDA_ERR_CHECK(cudaMalloc(&dValues, dataLen * sizeof(byte)));
+        u32* dRuns;
+        CUDA_ERR_CHECK(cudaMalloc(&dRuns, dataLen * sizeof(u32)));
         u64* dNRuns;
         CUDA_ERR_CHECK(cudaMalloc(&dNRuns, sizeof(u64)));
-
         auto dData = thrust::device_vector<byte>(data.begin(), data.end());
         auto dDiff = thrust::device_vector<u32>(dataLen);
+        auto dScannedDiff = thrust::device_vector<u32>(dataLen);
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] allocating and copying data to device").c_str());
+
+        timerGPU.start();
         dDiff[0] = 1;
         thrust::transform(thrust::device, dData.begin() + 1, dData.begin() + static_cast<long>(dataLen), dData.begin(),
                           dDiff.begin() + 1,
@@ -102,31 +118,29 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
                           {
                               return x == y ? 0 : 1;
                           });
-        auto dScannedDiff = thrust::device_vector<u32>(dataLen);
         thrust::inclusive_scan(thrust::device, dDiff.begin(), dDiff.end(), dScannedDiff.begin());
 
         u64 gridDim = ceilDiv(dataLen, BLOCK_SIZE);
         computeCompactedDiff<<<gridDim, BLOCK_SIZE>>>(
             thrust::raw_pointer_cast(dScannedDiff.data()), dataLen, dCompactedDiff, dNRuns);
-        u64 nRuns;
-        CUDA_ERR_CHECK(cudaMemcpy(&nRuns, dNRuns, sizeof(u64), cudaMemcpyDeviceToHost));
 
-        byte* dValues;
-        CUDA_ERR_CHECK(cudaMalloc(&dValues, nRuns * sizeof(byte)));
-        u32* dRuns;
-        CUDA_ERR_CHECK(cudaMalloc(&dRuns, nRuns * sizeof(u32)));
         computeRuns<<<gridDim, BLOCK_SIZE>>>(dCompactedDiff, thrust::raw_pointer_cast(dData.data()), dValues, dRuns,
-                                             nRuns);
+                                             dNRuns);
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] RL compression kernels and Thrust functions").c_str());
 
-        rl.nRuns = nRuns;
-        rl.values.resize(nRuns);
-        rl.runs.resize(nRuns);
-        CUDA_ERR_CHECK(cudaMemcpy(rl.values.data(), dValues, nRuns * sizeof(byte), cudaMemcpyDeviceToHost));
-        CUDA_ERR_CHECK(cudaMemcpy(rl.runs.data(), dRuns, nRuns * sizeof(u32), cudaMemcpyDeviceToHost));
+        timerGPU.start();
+        CUDA_ERR_CHECK(cudaMemcpy(&rl.nRuns, dNRuns, sizeof(u64), cudaMemcpyDeviceToHost));
+        rl.values.resize(rl.nRuns);
+        rl.runs.resize(rl.nRuns);
+        CUDA_ERR_CHECK(cudaMemcpy(rl.values.data(), dValues, rl.nRuns * sizeof(byte), cudaMemcpyDeviceToHost));
+        CUDA_ERR_CHECK(cudaMemcpy(rl.runs.data(), dRuns, rl.nRuns * sizeof(u32), cudaMemcpyDeviceToHost));
+        CUDA_ERR_CHECK(cudaFree(dNRuns));
         CUDA_ERR_CHECK(cudaFree(dRuns));
         CUDA_ERR_CHECK(cudaFree(dValues));
-        CUDA_ERR_CHECK(cudaFree(dNRuns));
         CUDA_ERR_CHECK(cudaFree(dCompactedDiff));
+        timerGPU.stop();
+        printf("%s\n", timer.formattedResult("[GPU] copying data to host and freeing").c_str());
         break;
     }
     }
