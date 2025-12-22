@@ -23,85 +23,84 @@ struct Args
     Version version;
 };
 
-std::optional<Args> parseArgs(int argc, char** argv)
+int parseArgs(int argc, char** argv, Args* args)
 {
     if (argc < 5)
     {
-        return {};
+        return 1;
     }
-    Args args;
 
     if (strcmp(argv[1], "c") == 0)
     {
-        args.opKind = Compress;
+        args->opKind = Compress;
     }
     else if (strcmp(argv[1], "d") == 0)
     {
-        args.opKind = Decompress;
+        args->opKind = Decompress;
     }
     else
     {
         fprintf(stderr, "<operation> must be c (compress) or d (decompress)\n");
-        return {};
+        return 1;
     }
     if (strcmp(argv[2], "fl") == 0)
     {
-        args.algoKind = FL;
+        args->algoKind = FL;
     }
     else if (strcmp(argv[2], "rl") == 0)
     {
-        args.algoKind = RL;
+        args->algoKind = RL;
     }
     else
     {
         fprintf(stderr, "<method> must be fl (fixed-legth) or rl (run-length)\n");
-        return {};
+        return 1;
     }
-    args.inputFile = std::string(argv[3]);
-    args.outputFile = std::string(argv[4]);
+    args->inputFile = std::string(argv[3]);
+    args->outputFile = std::string(argv[4]);
     if (argc >= 6 && strcmp(argv[5], "cpu") == 0)
     {
-        args.version = CPU;
+        args->version = CPU;
     }
     else
     {
-        args.version = GPU;
+        args->version = GPU;
     }
 
-    return args;
+    return 0;
 }
 
 int main(int argc, char** argv)
 {
     // TODO: RL, what happens to empty files?
 
-    std::optional<Args> args = parseArgs(argc, argv);
-    if (!args.has_value())
+    Args args;
+    if (parseArgs(argc, argv, &args) != 0)
     {
         ERR_AND_DIE(USAGE_STR);
     }
 
     CUDA_ERR_CHECK(cudaSetDevice(0));
-    if (args->opKind == Compress)
+    if (args.opKind == Compress)
     {
-        if (args->algoKind == FL)
+        if (args.algoKind == FL)
         {
-            flCompression(args->inputFile, args->outputFile, args->version);
+            flCompression(args.inputFile, args.outputFile, args.version);
         }
         else
         {
-            rlCompression(args->inputFile, args->outputFile, args->version);
+            rlCompression(args.inputFile, args.outputFile, args.version);
         }
     }
     else
     {
-        if (args->algoKind == FL)
+        if (args.algoKind == FL)
         {
-            flDecompression(args->inputFile, args->outputFile, args->version);
+            flDecompression(args.inputFile, args.outputFile, args.version);
         }
         else
         {
-            rlDecompression(args->inputFile, args->outputFile, args->version);
+            rlDecompression(args.inputFile, args.outputFile, args.version);
         }
     }
 
