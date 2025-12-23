@@ -74,23 +74,19 @@ __global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, by
     u64 bitOffset = bitLoc & 0b111;
     u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
 
-    // separate "odd" and "even" threads to avoid write conflicts
-    if ((idx & 0b1) == 0)
+    // split into 8 batches based on the thread id mod 8
+    // to prevent data races
+    for (u8 mod = 0; mod < 8; mod++)
     {
-        chunks[idx] |= curByte >> bitOffset;
-        if (bitOffset != 0)
+        if ((tidInBlock & 0b111) == mod)
         {
-            chunks[idx + 1] |= curByte << (8 - bitOffset);
+            chunks[idx] |= curByte >> bitOffset;
+            if (bitOffset != 0)
+            {
+                chunks[idx + 1] |= curByte << (8 - bitOffset);
+            }
         }
-    }
-    __syncthreads();
-    if ((idx & 0b1) == 1)
-    {
-        chunks[idx] |= curByte >> bitOffset;
-        if (bitOffset != 0)
-        {
-            chunks[idx + 1] |= curByte << (8 - bitOffset);
-        }
+        __syncthreads();
     }
 }
 

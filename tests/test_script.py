@@ -24,6 +24,9 @@ def gen_test(size, rep_chance):
 
 def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
     device = "gpu" if is_gpu else "cpu"
+    raw = "/tmp/raw"
+    compressed = "/tmp/comp"
+    decompressed = "/tmp/decomp"
     print(f"{'*' * 20} {method} [{device}] {'*' * 20}")
     for i in range(n_tests):
         gen_test(size, rep_chance)
@@ -33,8 +36,8 @@ def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
                 binary,
                 "c",
                 method,
-                "/tmp/raw",
-                "/tmp/compressed",
+                raw,
+                compressed,
                 device,
             ],
             stdout=subprocess.DEVNULL,
@@ -44,13 +47,13 @@ def run_tests(binary, n_tests, size, rep_chance, method, is_gpu):
                 binary,
                 "d",
                 method,
-                "/tmp/compressed",
-                "/tmp/decompressed",
+                compressed,
+                decompressed,
                 device,
             ],
             stdout=subprocess.DEVNULL,
         )
-        if subprocess.call(["diff", "/tmp/raw", "/tmp/decompressed"]) != 0:
+        if subprocess.call(["diff", raw, decompressed]) != 0:
             print("FAIL")
             break
         print("OK")

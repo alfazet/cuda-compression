@@ -22,20 +22,19 @@ __global__ void rlFillData(byte* data, u64 dataLen, const u64* scannedRuns, cons
         return;
     }
 
-    // binary search for the smallest i such that scannedRuns[i] >= tid,
-    // then we set data[tid] = values[i]
-    // TODO: broken
+    // binary search for the smallest i such that scannedRuns[i] - 1 >= tid,
+    // (minus one to account for 0-based indexing)
     u64 l = 0, r = nRuns - 1, i = nRuns - 1;
     while (l < r)
     {
         u64 mid = l + (r - l) / 2;
-        if (scannedRuns[mid] < tid)
+        if (scannedRuns[mid] - 1 < tid)
         {
             l = mid + 1;
         }
         else
         {
-            r = mid - 1;
+            r = mid;
             i = min(i, mid);
         }
     }
