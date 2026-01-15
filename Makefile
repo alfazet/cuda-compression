@@ -1,13 +1,13 @@
 COMMON_FLAGS=-Wno-deprecated-gpu-targets --extended-lambda
 FLAGS=
 BUILD_DIR=build
-DEBUG?=1
-ifeq ($(DEBUG),1)
-	FLAGS:=$(FLAGS) -g -G -O0
-	BUILD_DIR:=$(BUILD_DIR)/debug
-else
+DEBUG?=0
+ifeq ($(DEBUG),0)
 	FLAGS:=$(FLAGS) -O3
 	BUILD_DIR:=$(BUILD_DIR)/release
+else
+	FLAGS:=$(FLAGS) -g -G -O0
+	BUILD_DIR:=$(BUILD_DIR)/debug
 endif
 
 EXE=compress

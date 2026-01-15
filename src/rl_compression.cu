@@ -114,7 +114,7 @@ void rlCompression(const std::string& inputFile, const std::string& outputFile, 
         dDiff[0] = 1;
         thrust::transform(thrust::device, dData.begin() + 1, dData.begin() + static_cast<long>(dataLen), dData.begin(),
                           dDiff.begin() + 1,
-                          [] __device__(const int x, const int y)
+                          [] __device__(const byte x, const byte y)
                           {
                               return x == y ? 0 : 1;
                           });

@@ -64,7 +64,6 @@ inline Rl rlFromFile(const std::string& path)
     {
         u8 len;
         FREAD_CHECK(&len, sizeof(u8), 1, f);
-        // TODO: (maybe) reserve more special bytes to handle 8-byte lengths
         if (len == MARKER)
         {
             // read the next 4 bytes because they encode the actual length of this run
