@@ -48,6 +48,48 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
     }
 }
 
+// TODO: fix data race in line 75 and UB (__syncthreads_or in while loop)
+__global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, byte* chunks)
+{
+    u64 tidInBlock = threadIdx.x;
+    u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
+    if (tidGlobal >= dataLen)
+    {
+        return;
+    }
+
+    byte curByte = data[tidGlobal];
+    u8 blockBitDepth = 8;
+    while (blockBitDepth > 0 && __syncthreads_or((1 << (blockBitDepth - 1)) & curByte) == 0)
+    {
+        blockBitDepth--;
+    }
+    curByte <<= (8 - blockBitDepth);
+    if (tidInBlock == 0)
+    {
+        bitDepth[blockIdx.x] = blockBitDepth;
+    }
+    u64 bitLoc = 1UL * blockBitDepth * tidInBlock;
+    u64 byteLoc = bitLoc >> 3;
+    u64 bitOffset = bitLoc & 0b111;
+    u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
+
+    // split into 8 batches based on the thread id mod 8
+    // to prevent data races
+    for (u8 mod = 0; mod < 8; mod++)
+    {
+        if ((tidInBlock & 0b111) == mod)
+        {
+            chunks[idx] |= curByte >> bitOffset;
+            if (bitOffset != 0)
+            {
+                chunks[idx + 1] |= curByte << (8 - bitOffset);
+            }
+        }
+        __syncthreads();
+    }
+}
+
 void flCompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
     FILE* inFile = fopen(inputPath.c_str(), "rb");
@@ -71,10 +113,10 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
     FlMetadata flMetadata(rawFileSize);
     flMetadata.writeToFile(outFile);
     u64 batches = ceilDiv(rawFileSize, BATCH_SIZE), lastBatchSize = rawFileSize % BATCH_SIZE;
-    for (u64 i = 1; i <= batches; i++)
+    for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
-        printf("Batch %lu out of %lu\n", i, batches);
-        u64 batchSize = i == batches ? lastBatchSize : BATCH_SIZE;
+        printf("Batch %lu out of %lu\n", batchIdx, batches);
+        u64 batchSize = batchIdx == batches ? lastBatchSize : BATCH_SIZE;
 
         TimerCpu timerCpu;
         timerCpu.start();
@@ -92,7 +134,35 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
             printf("%s\n", timerCpu.formattedResult("[CPU] FL compression function").c_str());
             break;
         case Gpu:
-            printf("TODO\n");
+            TimerGPU timerGPU;
+            timerGPU.start();
+            byte* dData;
+            CUDA_ERR_CHECK(cudaMalloc(&dData, fl.batchSize * sizeof(byte)));
+            CUDA_ERR_CHECK(cudaMemcpy(dData, batch.data(), fl.batchSize * sizeof(byte), cudaMemcpyHostToDevice));
+            u8* dBitDepth;
+            CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
+            byte* dChunks;
+            CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
+            timerGPU.stop();
+            printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
+
+            timerGPU.start();
+            flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.batchSize, dBitDepth, dChunks);
+            timerGPU.stop();
+            printf("%s\n", timerGPU.formattedResult("[GPU] FL compression kernel").c_str());
+
+            timerGPU.start();
+            CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
+            for (u64 i = 0; i < fl.nChunks; i++)
+            {
+                CUDA_ERR_CHECK(cudaMemcpy(fl.chunks[i].data(), dChunks + i * CHUNK_SIZE, CHUNK_SIZE * sizeof(byte),
+                    cudaMemcpyDeviceToHost));
+            }
+            CUDA_ERR_CHECK(cudaFree(dData));
+            CUDA_ERR_CHECK(cudaFree(dBitDepth));
+            CUDA_ERR_CHECK(cudaFree(dChunks));
+            timerGPU.stop();
+            printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
             break;
         }
 

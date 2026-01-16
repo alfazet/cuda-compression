@@ -10,6 +10,7 @@ import subprocess
 TEST_NUMERIC = "n"
 TEST_RANDOM = "r"
 TEST_ORDERED = "o"
+TEST_UNIFORM = "u"
 
 
 def gen_random_numeric(size):
@@ -20,6 +21,11 @@ def gen_random_random(size):
     return random.randbytes(size)
 
 
+def gen_random_uniform(size):
+    r = random.randint(0, 7)
+    return bytes(r for _ in range(size))
+
+
 def gen_test(path, kind, size):
     with open(path, "wb") as file:
         if kind == TEST_NUMERIC:
@@ -28,12 +34,14 @@ def gen_test(path, kind, size):
             file.write(gen_random_random(size))
         if kind == TEST_ORDERED:
             file.write(gen_random_random(size))
+        if kind == TEST_UNIFORM:
+            file.write(gen_random_uniform(size))
 
 
 def run_tests(binary, n_tests, kind, size, raw, compressed, decompressed, version):
     for method in ["fl"]:
         print(f"\n{method.upper()} TESTS")
-        for i in range(1, n_tests + 1):
+        for i in range(0, n_tests):
             gen_test(raw, kind, size)
             print(f"test {i:04}: ", end="")
 
@@ -80,8 +88,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "-t",
-    help="type of tests to run ((n)umeric / (r)andom / (o)rdered) [default: (r)]",
-    choices=[TEST_NUMERIC, TEST_RANDOM, TEST_ORDERED],
+    help="type of tests to run ((n)umeric / (r)andom / (o)rdered / (u)niform) [default: (r)]",
+    choices=[TEST_NUMERIC, TEST_RANDOM, TEST_ORDERED, TEST_UNIFORM],
     default=TEST_RANDOM,
 )
 parser.add_argument(
@@ -101,7 +109,7 @@ binary, n_tests, kind, size, cpu = (
     args.cpu,
 )
 
-subprocess.call(["rm", "-f", "/tmp/test-*"])
+subprocess.call("rm -f /tmp/test-*", shell=True)
 random_ident = "".join(random.choices(population=string.ascii_lowercase, k=5))
 raw_path = f"/tmp/test-{random_ident}-raw"
 compressed_path = f"/tmp/test-{random_ident}-compressed"
