@@ -1,6 +1,6 @@
 #include "common.cuh"
 #include "fl.cuh"
-#include "rl.cuh"
+// #include "rl.cuh"
 
 enum OpKind
 {
@@ -10,8 +10,8 @@ enum OpKind
 
 enum AlgoKind
 {
-    FL,
-    RL,
+    Fl,
+    Rl,
 };
 
 struct Args
@@ -45,11 +45,11 @@ int parseArgs(int argc, char** argv, Args* args)
     }
     if (strcmp(argv[2], "fl") == 0)
     {
-        args->algoKind = FL;
+        args->algoKind = Fl;
     }
     else if (strcmp(argv[2], "rl") == 0)
     {
-        args->algoKind = RL;
+        args->algoKind = Rl;
     }
     else
     {
@@ -60,11 +60,11 @@ int parseArgs(int argc, char** argv, Args* args)
     args->outputFile = std::string(argv[4]);
     if (argc >= 6 && strcmp(argv[5], "cpu") == 0)
     {
-        args->version = CPU;
+        args->version = Cpu;
     }
     else
     {
-        args->version = GPU;
+        args->version = Gpu;
     }
 
     return 0;
@@ -77,28 +77,34 @@ int main(int argc, char** argv)
     {
         ERR_AND_DIE(USAGE_STR);
     }
+    if (!std::filesystem::exists(args.inputFile))
+    {
+        fprintf(stderr, "File %s not found\n", args.inputFile.c_str());
+        return EXIT_FAILURE;
+    }
 
-    CUDA_ERR_CHECK(cudaSetDevice(0));
     if (args.opKind == Compress)
     {
-        if (args.algoKind == FL)
+        if (args.algoKind == Fl)
         {
             flCompression(args.inputFile, args.outputFile, args.version);
         }
         else
         {
-            rlCompression(args.inputFile, args.outputFile, args.version);
+            printf("TODO\n");
+            // rlCompression(args.inputFile, args.outputFile, args.version);
         }
     }
     else
     {
-        if (args.algoKind == FL)
+        if (args.algoKind == Fl)
         {
             flDecompression(args.inputFile, args.outputFile, args.version);
         }
         else
         {
-            rlDecompression(args.inputFile, args.outputFile, args.version);
+            printf("TODO\n");
+            // rlDecompression(args.inputFile, args.outputFile, args.version);
         }
     }
 

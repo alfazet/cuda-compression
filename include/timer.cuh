@@ -3,7 +3,7 @@
 
 #include "common.cuh"
 
-class TimerCPU
+class TimerCpu
 {
 public:
     void start()
