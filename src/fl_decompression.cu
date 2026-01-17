@@ -78,7 +78,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         return;
     }
 
-    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, BATCH_SIZE), lastBatchSize = flMetadata.rawFileSizeTotal % BATCH_SIZE;
+    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE), lastBatchSize = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
     Fl fl;
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
@@ -89,7 +89,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     byte* dChunks;
     if (version == Gpu)
     {
-        CUDA_ERR_CHECK(cudaMalloc(&dData, BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dData, FL_BATCH_SIZE * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, MAX_N_CHUNKS * sizeof(u8)));
         CUDA_ERR_CHECK(cudaMalloc(&dChunks, MAX_N_CHUNKS * CHUNK_SIZE * sizeof(byte)));
     }
@@ -97,7 +97,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
         printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
-        u64 batchSize = batchIdx == batches ? lastBatchSize : BATCH_SIZE;
+        u64 batchSize = batchIdx == batches ? lastBatchSize : FL_BATCH_SIZE;
         std::vector<byte> batch(batchSize);
 
         if (!nextBatchReady)
@@ -134,7 +134,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
             if (batchIdx < batches)
             {
                 timerCpuInput.start();
-                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : BATCH_SIZE;
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : FL_BATCH_SIZE;
                 fl = Fl(flMetadata, nextBatchSize);
                 fl.readFromFile(inFile);
                 timerCpuInput.stop();
@@ -159,9 +159,9 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
     case Gpu:
-        CUDA_ERR_CHECK(cudaFree(dData));
-        CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
+        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+        CUDA_ERR_CHECK(cudaFree(dData));
         printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }

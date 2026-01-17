@@ -1,6 +1,6 @@
 #include "common.cuh"
 #include "fl.cuh"
-// #include "rl.cuh"
+#include "rl.cuh"
 
 enum OpKind
 {
@@ -91,8 +91,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            printf("TODO\n");
-            // rlCompression(args.inputFile, args.outputFile, args.version);
+            rlCompression(args.inputFile, args.outputFile, args.version);
         }
     }
     else

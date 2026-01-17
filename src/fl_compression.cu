@@ -116,9 +116,9 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
 
     FlMetadata flMetadata(rawFileSize);
     flMetadata.writeToFile(outFile);
-    u64 batches = ceilDiv(rawFileSize, BATCH_SIZE), lastBatchSize = rawFileSize % BATCH_SIZE;
+    u64 batches = ceilDiv(rawFileSize, FL_BATCH_SIZE), lastBatchSize = rawFileSize % FL_BATCH_SIZE;
     std::vector<byte> batch;
-    batch.reserve(BATCH_SIZE);
+    batch.reserve(FL_BATCH_SIZE);
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
     TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
@@ -128,7 +128,7 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
     byte* dChunks;
     if (version == Gpu)
     {
-        CUDA_ERR_CHECK(cudaMalloc(&dData, BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dData, FL_BATCH_SIZE * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, MAX_N_CHUNKS * sizeof(u8)));
         CUDA_ERR_CHECK(cudaMalloc(&dChunks, MAX_N_CHUNKS * CHUNK_SIZE * sizeof(byte)));
     }
@@ -136,7 +136,7 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
         printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
-        u64 batchSize = batchIdx == batches ? lastBatchSize : BATCH_SIZE;
+        u64 batchSize = batchIdx == batches ? lastBatchSize : FL_BATCH_SIZE;
         if (!nextBatchReady)
         {
             timerCpuInput.start();
@@ -165,7 +165,7 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
             if (batchIdx < batches)
             {
                 timerCpuInput.start();
-                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : BATCH_SIZE;
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : FL_BATCH_SIZE;
                 batch = readInputBatch(inFile, nextBatchSize);
                 timerCpuInput.stop();
                 nextBatchReady = true;
@@ -194,9 +194,9 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
         printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
     case Gpu:
-        CUDA_ERR_CHECK(cudaFree(dData));
-        CUDA_ERR_CHECK(cudaFree(dBitDepth));
         CUDA_ERR_CHECK(cudaFree(dChunks));
+        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+        CUDA_ERR_CHECK(cudaFree(dData));
         printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }

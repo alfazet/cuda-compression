@@ -4,8 +4,8 @@
 #include "common.cuh"
 
 constexpr u64 CHUNK_SIZE = 1024;
-constexpr u64 BATCH_SIZE = 1UL * 512 * 1024 * 1024; // in bytes
-constexpr u64 MAX_N_CHUNKS = BATCH_SIZE / CHUNK_SIZE;
+constexpr u64 FL_BATCH_SIZE = 1UL * 512 * 1024 * 1024; // in bytes
+constexpr u64 MAX_N_CHUNKS = FL_BATCH_SIZE / CHUNK_SIZE;
 
 /*
  *  FL data layout in memory:
@@ -19,18 +19,16 @@ constexpr u64 MAX_N_CHUNKS = BATCH_SIZE / CHUNK_SIZE;
 struct FlMetadata
 {
     u64 rawFileSizeTotal;
-    u64 nChunksTotal;
 
     FlMetadata() = default;
 
-    explicit FlMetadata(u64 _rawFileSizeTotal) : rawFileSizeTotal(_rawFileSizeTotal), nChunksTotal(ceilDiv(_rawFileSizeTotal, CHUNK_SIZE)) {}
+    explicit FlMetadata(u64 _rawFileSizeTotal) : rawFileSizeTotal(_rawFileSizeTotal) {}
 
     explicit FlMetadata(FILE* f)
     {
         u64 rawFileSizeTotal;
         FREAD_CHECK(&rawFileSizeTotal, sizeof(u64), 1, f);
         this->rawFileSizeTotal = rawFileSizeTotal;
-        this->nChunksTotal = ceilDiv(this->rawFileSizeTotal, CHUNK_SIZE);
     }
 
     void writeToFile(FILE* f) const
