@@ -78,30 +78,36 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     }
 
     u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, BATCH_SIZE), lastBatchSize = flMetadata.rawFileSizeTotal % BATCH_SIZE;
+    Fl fl;
+    bool nextBatchReady = false;
+    TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
+    TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
-        printf("Batch %lu out of %lu\n", batchIdx, batches);
+        printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
         u64 batchSize = batchIdx == batches ? lastBatchSize : BATCH_SIZE;
-        Fl fl(flMetadata, batchSize);
         std::vector<byte> batch(batchSize);
 
-        TimerCpu timerCpu;
-        timerCpu.start();
-        fl.readFromFile(inFile);
-        timerCpu.stop();
-        printf("%s\n", timerCpu.formattedResult("[CPU] reading from the input file").c_str());
+        if (!nextBatchReady)
+        {
+            fl = Fl(flMetadata, batchSize);
+            timerCpuInput.start();
+            fl.readFromFile(inFile);
+            timerCpuInput.stop();
+            nextBatchReady = true;
+        }
 
         switch (version)
         {
         case Cpu:
-            timerCpu.start();
+            timerCpuComputing.start();
             flDecompressionCPU(fl, batch);
-            timerCpu.stop();
-            printf("%s\n", timerCpu.formattedResult("[CPU] FL decompression function").c_str());
+            timerCpuComputing.stop();
+            nextBatchReady = false;
             break;
         case Gpu:
-            TimerGPU timerGPU;
-            timerGPU.start();
+            timerGpuMemHostToDev.start();
             byte* dData;
             CUDA_ERR_CHECK(cudaMalloc(&dData, fl.batchSize * sizeof(byte)));
             u8* dBitDepth;
@@ -114,30 +120,46 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
                 CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
                     cudaMemcpyHostToDevice));
             }
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
+            timerGpuMemHostToDev.stop();
 
-            timerGPU.start();
+            timerGpuComputing.start();
             flDecompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.batchSize, dBitDepth, dChunks);
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] FL decompression kernel").c_str());
+            // the kernel launch is async so we read the next batch of input in the meantime
+            u64 tmpBatchSize = fl.batchSize;
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : BATCH_SIZE;
+                fl = Fl(flMetadata, nextBatchSize);
+                fl.readFromFile(inFile);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
 
-            timerGPU.start();
-            CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, fl.batchSize * sizeof(byte), cudaMemcpyDeviceToHost));
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, tmpBatchSize * sizeof(byte), cudaMemcpyDeviceToHost));
             CUDA_ERR_CHECK(cudaFree(dData));
             CUDA_ERR_CHECK(cudaFree(dBitDepth));
             CUDA_ERR_CHECK(cudaFree(dChunks));
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
+            timerGpuMemDevToHost.stop();
             break;
         }
 
-        timerCpu.start();
+        timerCpuOutput.start();
         writeOutputBatch(outFile, batch);
-        timerCpu.stop();
-        printf("%s\n", timerCpu.formattedResult("[CPU] writing to the output file").c_str());
+        timerCpuOutput.stop();
     }
 
+    switch (version)
+    {
+    case Cpu:
+        printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
+        break;
+    case Gpu:
+        printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
+        break;
+    }
     fclose(outFile);
     fclose(inFile);
 }

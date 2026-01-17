@@ -20,6 +20,8 @@ struct FlMetadata
     u64 rawFileSizeTotal;
     u64 nChunksTotal;
 
+    FlMetadata() = default;
+
     explicit FlMetadata(u64 _rawFileSizeTotal) : rawFileSizeTotal(_rawFileSizeTotal), nChunksTotal(ceilDiv(_rawFileSizeTotal, CHUNK_SIZE)) {}
 
     explicit FlMetadata(FILE* f)
@@ -43,6 +45,8 @@ struct Fl
     u64 nChunks;
     std::vector<u8> bitDepth;
     std::vector<std::array<byte, CHUNK_SIZE> > chunks;
+
+    Fl() = default;
 
     Fl(FlMetadata _metadata, u64 _batchSize) : metadata(_metadata), batchSize(_batchSize)
     {

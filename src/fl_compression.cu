@@ -21,7 +21,7 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
             u8 bitDepthHere = 0;
             for (int b = 7; b >= 0; b--)
             {
-                if ((0b1 << b) & curByte)
+                if ((1 << b) & curByte)
                 {
                     bitDepthHere = b + 1;
                     break;
@@ -116,29 +116,35 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
     FlMetadata flMetadata(rawFileSize);
     flMetadata.writeToFile(outFile);
     u64 batches = ceilDiv(rawFileSize, BATCH_SIZE), lastBatchSize = rawFileSize % BATCH_SIZE;
+    std::vector<byte> batch;
+    batch.reserve(BATCH_SIZE);
+    bool nextBatchReady = false;
+    TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
+    TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
-        printf("Batch %lu out of %lu\n", batchIdx, batches);
+        printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
         u64 batchSize = batchIdx == batches ? lastBatchSize : BATCH_SIZE;
-
-        TimerCpu timerCpu;
-        timerCpu.start();
-        std::vector<byte> batch = readInputBatch(inFile, batchSize);
-        timerCpu.stop();
-        printf("%s\n", timerCpu.formattedResult("[CPU] reading from the input file").c_str());
+        if (!nextBatchReady)
+        {
+            timerCpuInput.start();
+            batch = readInputBatch(inFile, batchSize);
+            timerCpuInput.stop();
+            nextBatchReady = true;
+        }
 
         Fl fl(flMetadata, batchSize);
         switch (version)
         {
         case Cpu:
-            timerCpu.start();
+            timerCpuComputing.start();
             flCompressionCPU(fl, batch);
-            timerCpu.stop();
-            printf("%s\n", timerCpu.formattedResult("[CPU] FL compression function").c_str());
+            timerCpuComputing.stop();
+            nextBatchReady = false;
             break;
         case Gpu:
-            TimerGPU timerGPU;
-            timerGPU.start();
+            timerGpuMemHostToDev.start();
             byte* dData;
             CUDA_ERR_CHECK(cudaMalloc(&dData, fl.batchSize * sizeof(byte)));
             CUDA_ERR_CHECK(cudaMemcpy(dData, batch.data(), fl.batchSize * sizeof(byte), cudaMemcpyHostToDevice));
@@ -146,15 +152,22 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
             CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
             byte* dChunks;
             CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
+            timerGpuMemHostToDev.stop();
 
-            timerGPU.start();
+            timerGpuComputing.start();
             flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.batchSize, dBitDepth, dChunks);
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] FL compression kernel").c_str());
+            // the kernel launch is async so we read the next batch of input in the meantime
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : BATCH_SIZE;
+                batch = readInputBatch(inFile, nextBatchSize);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
 
-            timerGPU.start();
+            timerGpuMemDevToHost.start();
             CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
             for (u64 i = 0; i < fl.nChunks; i++)
             {
@@ -164,17 +177,24 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
             CUDA_ERR_CHECK(cudaFree(dData));
             CUDA_ERR_CHECK(cudaFree(dBitDepth));
             CUDA_ERR_CHECK(cudaFree(dChunks));
-            timerGPU.stop();
-            printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
+            timerGpuMemDevToHost.stop();
             break;
         }
 
-        timerCpu.start();
+        timerCpuOutput.start();
         fl.writeToFile(outFile);
-        timerCpu.stop();
-        printf("%s\n", timerCpu.formattedResult("[CPU] writing to the output file").c_str());
+        timerCpuOutput.stop();
     }
 
+    switch (version)
+    {
+    case Cpu:
+        printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
+        break;
+    case Gpu:
+        printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
+        break;
+    }
     fclose(outFile);
     fclose(inFile);
 }

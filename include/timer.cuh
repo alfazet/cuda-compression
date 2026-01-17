@@ -6,36 +6,32 @@
 class TimerCpu
 {
 public:
+    u64 elapsedMillis = 0;
+
     void start()
     {
-        this->m_elapsedMillis = 0;
         this->m_start = std::chrono::high_resolution_clock::now();
     }
 
     void stop()
     {
         this->m_end = std::chrono::high_resolution_clock::now();
-        this->m_elapsedMillis = std::chrono::duration_cast<std::chrono::milliseconds>(this->m_end - this->m_start).
+        this->elapsedMillis += std::chrono::duration_cast<std::chrono::milliseconds>(this->m_end - this->m_start).
             count();
-    }
-
-    std::string formattedResult(const char* name) const
-    {
-        return std::string(name) + ": " + std::to_string(this->m_elapsedMillis) + " ms";
     }
 
 private:
     std::chrono::high_resolution_clock::time_point m_start = {};
     std::chrono::high_resolution_clock::time_point m_end = {};
-    u64 m_elapsedMillis = 0;
 };
 
-class TimerGPU
+class TimerGpu
 {
 public:
+    float elapsedMillis = 0.0f;
+
     void start()
     {
-        this->m_elapsedMillis = 0.0f;
         CUDA_ERR_CHECK(cudaEventCreate(&this->m_start));
         CUDA_ERR_CHECK(cudaEventCreate(&this->m_end));
         CUDA_ERR_CHECK(cudaEventRecord(this->m_start));
@@ -45,20 +41,36 @@ public:
     {
         CUDA_ERR_CHECK(cudaEventRecord(this->m_end));
         CUDA_ERR_CHECK(cudaEventSynchronize(this->m_end));
-        CUDA_ERR_CHECK(cudaEventElapsedTime(&this->m_elapsedMillis, this->m_start, this->m_end));
+        float elapsed;
+        CUDA_ERR_CHECK(cudaEventElapsedTime(&elapsed, this->m_start, this->m_end));
+        this->elapsedMillis += elapsed;
         CUDA_ERR_CHECK(cudaEventDestroy(this->m_start));
         CUDA_ERR_CHECK(cudaEventDestroy(this->m_end));
-    }
-
-    std::string formattedResult(const char* name) const
-    {
-        return std::string(name) + ": " + std::to_string(this->m_elapsedMillis) + " ms";
     }
 
 private:
     cudaEvent_t m_start = {};
     cudaEvent_t m_end = {};
-    float m_elapsedMillis = 0.0f;
 };
+
+inline void printCpuTimers(TimerCpu input, TimerCpu computing, TimerCpu output)
+{
+
+    printf("\nDone.\nTotal time required for:\n");
+    printf("File input: %lu ms\n", input.elapsedMillis);
+    printf("CPU computation: %lu ms\n", computing.elapsedMillis);
+    printf("File output: %lu ms\n", output.elapsedMillis);
+}
+
+inline void printGpuTimers(TimerCpu input, TimerGpu hostToDev, TimerGpu computing, TimerGpu devToHost, TimerCpu output)
+{
+
+    printf("\nDone.\nTotal time required for:\n");
+    printf("File input: %lu ms\n", input.elapsedMillis);
+    printf("Host->device memory copying: %.3f ms\n", hostToDev.elapsedMillis);
+    printf("GPU computation: %.3f ms\n", computing.elapsedMillis);
+    printf("Device->host memory copying: %.3f ms\n", devToHost.elapsedMillis);
+    printf("File output: %lu ms\n", output.elapsedMillis);
+}
 
 #endif //CUDA_COMPRESSION_TIMER_CUH
