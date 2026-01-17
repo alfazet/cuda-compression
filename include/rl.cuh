@@ -9,29 +9,89 @@
 #include <thrust/transform.h>
 
 constexpr u64 BLOCK_SIZE = 1024;
-constexpr byte MARKER = 0x00;
+constexpr u64 RL_BATCH_SIZE = 1UL * 128 * 1024 * 1024; // in bytes
+constexpr byte LONG_RUN_MARKER = 0x00;
+
+/*
+ *  RL data layout in memory:
+ *  - length of uncompressed data (1 x u64)
+ *  - Interleaved:
+ *  - number of `runs` (sequences of consecutive values) (1 x u32)
+ *  - run values (1 byte each)
+ *  - run lengths (1 byte each (for run lengths that fit in one byte), 5 bytes for longer runs)
+ */
+
+struct RlMetadata
+{
+    u64 rawFileSizeTotal;
+
+    RlMetadata() = default;
+
+    explicit RlMetadata(u64 _rawFileSizeTotal) : rawFileSizeTotal(_rawFileSizeTotal) {}
+
+    explicit RlMetadata(FILE* f)
+    {
+        u64 rawFileSizeTotal;
+        FREAD_CHECK(&rawFileSizeTotal, sizeof(u64), 1, f);
+        this->rawFileSizeTotal = rawFileSizeTotal;
+    }
+
+    void writeToFile(FILE* f) const { FWRITE_CHECK(&this->rawFileSizeTotal, sizeof(u64), 1, f); }
+};
 
 struct Rl
 {
-    u64 dataLen; // length of raw data (before compression)
-    u64 nRuns; // length of `runs` array = length of `values` array
+    RlMetadata metadata;
+    u64 batchSize;
+    u32 nRuns = {};
     std::vector<byte> values;
-    std::vector<u32> runs;
+    std::vector<u32> lengths;
 
-    Rl(u64 dataLen, u64 nRuns)
+    Rl() = default;
+
+    Rl(RlMetadata _metadata, u64 _batchSize) : metadata(_metadata), batchSize(_batchSize) {}
+
+    // write the result of compressing one batch
+    void writeToFile(FILE* f) const
     {
-        this->dataLen = dataLen;
-        this->nRuns = nRuns;
-        this->values = std::vector<byte>(nRuns);
-        this->runs = std::vector<u32>(nRuns);
+        FWRITE_CHECK(&this->nRuns, sizeof(u32), 1, f);
+        FWRITE_CHECK(this->values.data(), sizeof(byte), this->nRuns, f);
+        for (u64 i = 0; i < this->nRuns; i++)
+        {
+            u32 len = this->lengths[i];
+            if (len <= 255)
+            {
+                u8 shortLen = static_cast<u8>(len);
+                FWRITE_CHECK(&shortLen, sizeof(u8), 1, f);
+            }
+            else
+            {
+                fputc(LONG_RUN_MARKER, f);
+                FWRITE_CHECK(&len, sizeof(u32), 1, f);
+            }
+        }
     }
 
-    explicit Rl(u64 dataLen)
+    // read exactly the data needed to decompress one batch
+    void readFromFile(FILE* f)
     {
-        this->dataLen = dataLen;
-        this->nRuns = 0;
-        this->values = {};
-        this->runs = {};
+        FREAD_CHECK(&this->nRuns, sizeof(u32), 1, f);
+        this->values.resize(this->nRuns);
+        FREAD_CHECK(this->values.data(), sizeof(byte), this->nRuns, f);
+        this->lengths.resize(this->nRuns);
+        for (u32 i = 0; i < this->nRuns; i++)
+        {
+            u8 len;
+            FREAD_CHECK(&len, sizeof(u8), 1, f);
+            if (len == LONG_RUN_MARKER)
+            {
+                FREAD_CHECK(&this->lengths[i], sizeof(u32), 1, f);
+            }
+            else
+            {
+                this->lengths[i] = static_cast<u32>(len);
+            }
+        }
     }
 };
 
@@ -39,74 +99,4 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
 
 void rlDecompression(const std::string& inputPath, const std::string& outputPath, Version version);
 
-/*
- *  RL data layout in memory:
- *  - length of uncompressed data (1 x u64)
- *  - length of `runs` (= length of `values`) (1 x u64)
- *  - values (1 byte each)
- *  - runs (1 byte each for runs whose length fits in one byte, for longer runs
- *      the first byte is 0x00 and the next 4 bytes after that carry the actual value as a u32)
- */
-inline Rl rlFromFile(const std::string& path)
-{
-    FILE* f = fopen(path.c_str(), "rb");
-    if (f == nullptr)
-    {
-        ERR_AND_DIE("fopen");
-    }
-    u64 dataLen, nRuns;
-    FREAD_CHECK(&dataLen, sizeof(u64), 1, f);
-    FREAD_CHECK(&nRuns, sizeof(u64), 1, f);
-
-    Rl rl(dataLen, nRuns);
-    FREAD_CHECK(rl.values.data(), sizeof(byte), rl.nRuns, f);
-    for (u64 i = 0; i < rl.nRuns; i++)
-    {
-        u8 len;
-        FREAD_CHECK(&len, sizeof(u8), 1, f);
-        if (len == MARKER)
-        {
-            // read the next 4 bytes because they encode the actual length of this run
-            u32 actualLen;
-            FREAD_CHECK(&actualLen, sizeof(u32), 1, f);
-            rl.runs[i] = actualLen;
-        }
-        else
-        {
-            // this single byte is equal to the length
-            rl.runs[i] = static_cast<u32>(len);
-        }
-    }
-
-    return rl;
-}
-
-inline void rlToFile(const std::string& path, const Rl& rl)
-{
-    FILE* f = fopen(path.c_str(), "wb");
-    if (f == nullptr)
-    {
-        ERR_AND_DIE("fopen");
-    }
-    FWRITE_CHECK(&rl.dataLen, sizeof(u64), 1, f);
-    FWRITE_CHECK(&rl.nRuns, sizeof(u64), 1, f);
-    FWRITE_CHECK(rl.values.data(), sizeof(byte), rl.nRuns, f);
-    for (u64 i = 0; i < rl.nRuns; i++)
-    {
-        u32 len = rl.runs[i];
-        // we know that len > 0, so
-        // the "special" byte 0x00 won't be written here
-        if (len <= 255)
-        {
-            u8 shortLen = static_cast<u8>(len);
-            FWRITE_CHECK(&shortLen, sizeof(u8), 1, f);
-        }
-        else
-        {
-            fputc(MARKER, f);
-            FWRITE_CHECK(&len, sizeof(u32), 1, f);
-        }
-    }
-}
-
-#endif //CUDA_COMPRESSION_RL_CUH
+#endif // CUDA_COMPRESSION_RL_CUH

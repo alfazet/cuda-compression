@@ -10,6 +10,7 @@
 #include <vector>
 #include <utility>
 #include <fstream>
+#include <filesystem>
 
 #include "cuda_runtime.h"
 
@@ -21,8 +22,8 @@ typedef unsigned long u64;
 
 enum Version
 {
-    CPU,
-    GPU,
+    Cpu,
+    Gpu,
 };
 
 constexpr char const* USAGE_STR =
@@ -65,33 +66,17 @@ T ceilDiv(T a, T b)
     return (a + b - 1) / b;
 }
 
-inline std::vector<byte> readDataFile(const std::string& path)
+inline std::vector<byte> readInputBatch(FILE* f, u64 batchSize)
 {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (f == nullptr)
-    {
-        ERR_AND_DIE("fopen");
-    }
-    fseek(f, 0, SEEK_END);
-    u64 fileSize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    std::vector<byte> content(fileSize);
-    FREAD_CHECK(content.data(), sizeof(byte), fileSize, f);
-    fclose(f);
+    std::vector<byte> batch(batchSize);
+    FREAD_CHECK(batch.data(), sizeof(byte), batchSize, f);
 
-    return content;
+    return batch;
 }
 
-inline void writeDataFile(const std::string& path, const std::vector<byte>& data)
+inline void writeOutputBatch(FILE* f, const std::vector<byte>& batch)
 {
-    FILE* f = fopen(path.c_str(), "wb");
-    if (f == nullptr)
-    {
-        ERR_AND_DIE("fopen");
-    }
-    u64 len = data.size();
-    FWRITE_CHECK(data.data(), sizeof(byte), len, f);
-    fclose(f);
+    FWRITE_CHECK(batch.data(), sizeof(byte), batch.size(), f);
 }
 
 #endif //CUDA_COMPRESSION_COMMON_CUH

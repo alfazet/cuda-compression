@@ -1,26 +1,27 @@
 #include "fl.cuh"
 #include "timer.cuh"
 
-void flCompressionCPU(const std::vector<byte>& data, Fl& fl)
+void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
 {
     for (u64 i = 0; i < fl.nChunks; i++)
     {
         u64 len = CHUNK_SIZE;
-        if ((i + 1) * CHUNK_SIZE > fl.dataLen)
+        if ((i + 1) * CHUNK_SIZE > fl.batchSize)
         {
             // the last chunk might be shorter than CHUNK_SIZE bytes
-            len = fl.dataLen % CHUNK_SIZE;
+            len = fl.batchSize % CHUNK_SIZE;
         }
 
-        // bit depth of this chunk = the max. MSb of all bytes contained in it
-        u8 bitDepth = 0;
+        // the bit depth of a chunk = the max. MSb of all bytes contained in it
+        // (with one edge case: when all bytes are 0x00, the bitDepth should be 1, not 0)
+        u8 bitDepth = 1;
         for (u64 j = 0; j < len; j++)
         {
-            byte curByte = data[i * CHUNK_SIZE + j];
+            byte curByte = batch[i * CHUNK_SIZE + j];
             u8 bitDepthHere = 0;
             for (int b = 7; b >= 0; b--)
             {
-                if ((0b1 << b) & curByte)
+                if ((1 << b) & curByte)
                 {
                     bitDepthHere = b + 1;
                     break;
@@ -31,8 +32,8 @@ void flCompressionCPU(const std::vector<byte>& data, Fl& fl)
         fl.bitDepth[i] = bitDepth;
         for (u64 j = 0; j < len; j++)
         {
-            byte curByte = data[i * CHUNK_SIZE + j] << (8 - bitDepth);
-            u64 bitLoc = bitDepth * j;
+            byte curByte = batch[i * CHUNK_SIZE + j] << (8 - bitDepth);
+            u64 bitLoc = j * bitDepth;
             u64 byteLoc = bitLoc >> 3;
             u64 bitOffset = bitLoc & 0b111;
             // place the relevant bits of this byte
@@ -47,113 +48,158 @@ void flCompressionCPU(const std::vector<byte>& data, Fl& fl)
     }
 }
 
-
-// takes "flattened" chunks - chunk 0 is [0, CHUNK_SIZE), chunk 1 is [CHUNK_SIZE, 2 * CHUNK_SIZE), ...
-__global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, byte* chunks)
+__global__ void flCompressionGPU(const byte* batch, u64 batchSize, u8* bitDepth, byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
-    u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
-    if (tidGlobal >= dataLen)
+    u64 globalTid = blockIdx.x * blockDim.x + tidInBlock;
+    if (globalTid >= batchSize)
     {
         return;
     }
 
-    byte curByte = data[tidGlobal];
-    u8 blockBitDepth = 8;
-    while (blockBitDepth > 0 && __syncthreads_or((0b1 << (blockBitDepth - 1)) & curByte) == 0)
+    byte myInByte = batch[globalTid];
+    u8 blockBitDepth = 1;
+    for (u8 i = 1; i < 8; i++)
     {
-        blockBitDepth--;
+        // if some byte in this block has the i-th bit on,
+        // then its bit depth >= i + 1
+        if (__syncthreads_or((1 << i) & myInByte) != 0)
+        {
+            blockBitDepth = i + 1;
+        }
     }
-    curByte <<= 8 - blockBitDepth;
     if (tidInBlock == 0)
     {
         bitDepth[blockIdx.x] = blockBitDepth;
     }
-    u64 bitLoc = 1UL * blockBitDepth * tidInBlock;
-    u64 byteLoc = bitLoc >> 3;
-    u64 bitOffset = bitLoc & 0b111;
-    u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
-
-    // split into 8 batches based on the thread id mod 8
-    // to prevent data races
-    for (u8 mod = 0; mod < 8; mod++)
+    // gather bits into my output byte
+    byte myOutByte = 0;
+    u64 myOffset = blockIdx.x * blockDim.x;
+    u64 myEnd = (blockIdx.x + 1) * blockDim.x;
+    for (u8 i = 0; i < 8; i++)
     {
-        if ((tidInBlock & 0b111) == mod)
+        u64 dataByteIdx = myOffset + (tidInBlock * 8 + i) / blockBitDepth;
+        u64 dataBitIdx = (tidInBlock * 8 + i) % blockBitDepth;
+        if (dataByteIdx >= myEnd)
         {
-            chunks[idx] |= curByte >> bitOffset;
-            if (bitOffset != 0)
-            {
-                chunks[idx + 1] |= curByte << (8 - bitOffset);
-            }
+            break;
         }
-        __syncthreads();
+        u8 dataByte = batch[dataByteIdx] << (8 - blockBitDepth);
+        if ((dataByte & (1 << (7 - dataBitIdx))) != 0)
+        {
+            myOutByte |= 1 << (7 - i);
+        }
     }
+    chunks[globalTid] = myOutByte;
 }
 
-void flCompression(const std::string& inputFile, const std::string& outputFile, Version version)
+void flCompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
-    TimerCPU timer;
-    timer.start();
-    std::vector<byte> data = readDataFile(inputFile);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
-
-    u64 dataLen = data.size();
-    if (dataLen == 0)
+    FILE* inFile = fopen(inputPath.c_str(), "rb");
+    if (inFile == nullptr)
     {
-        printf("Empty input file, no compression required\n");
-        writeDataFile(outputFile, {});
+        ERR_AND_DIE("fopen");
+    }
+    FILE* outFile = fopen(outputPath.c_str(), "wb");
+    if (outFile == nullptr)
+    {
+        ERR_AND_DIE("fopen");
+    }
+    u64 rawFileSize = std::filesystem::file_size(inputPath);
+    if (rawFileSize == 0)
+    {
+        printf("Empty file\n");
+        fclose(outFile);
+        fclose(inFile);
         return;
     }
 
-    Fl fl(dataLen);
+    FlMetadata flMetadata(rawFileSize);
+    flMetadata.writeToFile(outFile);
+    u64 batches = ceilDiv(rawFileSize, FL_BATCH_SIZE), lastBatchSize = rawFileSize % FL_BATCH_SIZE;
+    std::vector<byte> batch;
+    batch.reserve(FL_BATCH_SIZE);
+    bool nextBatchReady = false;
+    TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
+    TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
+    byte* dData;
+    u8* dBitDepth;
+    byte* dChunks;
+    if (version == Gpu)
+    {
+        CUDA_ERR_CHECK(cudaMalloc(&dData, FL_BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, MAX_N_CHUNKS * sizeof(u8)));
+        CUDA_ERR_CHECK(cudaMalloc(&dChunks, MAX_N_CHUNKS * CHUNK_SIZE * sizeof(byte)));
+    }
+
+    for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
+    {
+        printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
+        u64 batchSize = batchIdx == batches ? lastBatchSize : FL_BATCH_SIZE;
+        if (!nextBatchReady)
+        {
+            timerCpuInput.start();
+            batch = readInputBatch(inFile, batchSize);
+            timerCpuInput.stop();
+            nextBatchReady = true;
+        }
+
+        Fl fl(flMetadata, batchSize);
+        switch (version)
+        {
+        case Cpu:
+            timerCpuComputing.start();
+            flCompressionCPU(fl, batch);
+            timerCpuComputing.stop();
+            nextBatchReady = false;
+            break;
+        case Gpu:
+            timerGpuMemHostToDev.start();
+            CUDA_ERR_CHECK(cudaMemcpy(dData, batch.data(), fl.batchSize * sizeof(byte), cudaMemcpyHostToDevice));
+            timerGpuMemHostToDev.stop();
+
+            timerGpuComputing.start();
+            flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.batchSize, dBitDepth, dChunks);
+            // the kernel launch is async so we read the next batch of input in the meantime
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : FL_BATCH_SIZE;
+                batch = readInputBatch(inFile, nextBatchSize);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
+
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
+            for (u64 i = 0; i < fl.nChunks; i++)
+            {
+                CUDA_ERR_CHECK(cudaMemcpy(fl.chunks[i].data(), dChunks + i * CHUNK_SIZE, CHUNK_SIZE * sizeof(byte),
+                                          cudaMemcpyDeviceToHost));
+            }
+            timerGpuMemDevToHost.stop();
+            break;
+        }
+
+        timerCpuOutput.start();
+        fl.writeToFile(outFile);
+        timerCpuOutput.stop();
+    }
+
     switch (version)
     {
-    case CPU:
-    {
-        timer.start();
-        flCompressionCPU(data, fl);
-        timer.stop();
-        printf("%s\n", timer.formattedResult("[CPU] FL compression function").c_str());
+    case Cpu:
+        printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
-    }
-    case GPU:
-    {
-        TimerGPU timerGPU;
-        timerGPU.start();
-        byte* dData;
-        CUDA_ERR_CHECK(cudaMalloc(&dData, dataLen * sizeof(byte)));
-        CUDA_ERR_CHECK(cudaMemcpy(dData, data.data(), dataLen * sizeof(byte), cudaMemcpyHostToDevice));
-        u8* dBitDepth;
-        CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
-        byte* dChunks;
-        CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
-
-        timerGPU.start();
-        flCompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] FL compression kernel").c_str());
-
-        timerGPU.start();
-        CUDA_ERR_CHECK(cudaMemcpy(fl.bitDepth.data(), dBitDepth, fl.nChunks * sizeof(u8), cudaMemcpyDeviceToHost));
-        for (u64 i = 0; i < fl.nChunks; i++)
-        {
-            CUDA_ERR_CHECK(cudaMemcpy(fl.chunks[i].data(), dChunks + i * CHUNK_SIZE, CHUNK_SIZE * sizeof(byte),
-                cudaMemcpyDeviceToHost));
-        }
-        CUDA_ERR_CHECK(cudaFree(dData));
-        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+    case Gpu:
         CUDA_ERR_CHECK(cudaFree(dChunks));
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
+        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+        CUDA_ERR_CHECK(cudaFree(dData));
+        printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }
-    }
-
-    timer.start();
-    flToFile(outputFile, fl);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] writing the output file").c_str());
+    fclose(outFile);
+    fclose(inFile);
 }

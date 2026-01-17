@@ -1,15 +1,15 @@
 #include "fl.cuh"
 #include "timer.cuh"
 
-void flDecompressionCPU(const Fl& fl, std::vector<byte>& data)
+void flDecompressionCPU(const Fl& fl, std::vector<byte>& batch)
 {
     for (u64 i = 0; i < fl.nChunks; i++)
     {
         u64 len = CHUNK_SIZE;
-        if ((i + 1) * CHUNK_SIZE > fl.dataLen)
+        if ((i + 1) * CHUNK_SIZE > fl.batchSize)
         {
             // the last chunk might be shorter than CHUNK_SIZE bytes
-            len = fl.dataLen % CHUNK_SIZE;
+            len = fl.batchSize % CHUNK_SIZE;
         }
         u8 bitDepth = fl.bitDepth[i];
         for (u64 j = 0; j < len; j++)
@@ -26,17 +26,16 @@ void flDecompressionCPU(const Fl& fl, std::vector<byte>& data)
                 mask = (0xff << (8 - bitOffset)) << (8 - bitDepth);
                 decoded |= ((fl.chunks[i][byteLoc + 1] & mask) >> (8 - bitOffset)) >> (8 - bitDepth);
             }
-            data[i * CHUNK_SIZE + j] = decoded;
+            batch[i * CHUNK_SIZE + j] = decoded;
         }
     }
 }
 
-// takes "flattened" chunks - chunk 0 is [0, CHUNK_SIZE), chunk 1 is [CHUNK_SIZE, 2 * CHUNK_SIZE), ...
-__global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, const byte* chunks)
+__global__ void flDecompressionGPU(byte* batch, u64 batchSize, const u8* bitDepth, const byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
     u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
-    if (tidGlobal >= dataLen)
+    if (tidGlobal >= batchSize)
     {
         return;
     }
@@ -47,7 +46,6 @@ __global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, 
     u64 bitOffset = bitLoc & 0b111;
     byte mask = 0xff << (8 - blockBitDepth);
     mask >>= bitOffset;
-
     u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
     byte decoded = (chunks[idx] & mask) << bitOffset;
     decoded = decoded >> (8 - blockBitDepth);
@@ -56,65 +54,118 @@ __global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, 
         mask = (0xff << (8 - bitOffset)) << (8 - blockBitDepth);
         decoded |= ((chunks[idx + 1] & mask) >> (8 - bitOffset)) >> (8 - blockBitDepth);
     }
-    data[tidGlobal] = decoded;
+    batch[tidGlobal] = decoded;
 }
 
 void flDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
-    TimerCPU timer;
-    timer.start();
-    const Fl fl = flFromFile(inputPath);
-    std::vector<byte> data(fl.dataLen);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
+    FILE* inFile = fopen(inputPath.c_str(), "rb");
+    if (inFile == nullptr)
+    {
+        ERR_AND_DIE("fopen");
+    }
+    FILE* outFile = fopen(outputPath.c_str(), "wb");
+    if (outFile == nullptr)
+    {
+        ERR_AND_DIE("fopen");
+    }
+    FlMetadata flMetadata(inFile);
+    if (flMetadata.rawFileSizeTotal == 0)
+    {
+        printf("Empty file\n");
+        fclose(outFile);
+        fclose(inFile);
+        return;
+    }
+
+    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE),
+        lastBatchSize = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
+    Fl fl;
+    bool nextBatchReady = false;
+    TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
+    TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
+    byte* dData;
+    u8* dBitDepth;
+    byte* dChunks;
+    if (version == Gpu)
+    {
+        CUDA_ERR_CHECK(cudaMalloc(&dData, FL_BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, MAX_N_CHUNKS * sizeof(u8)));
+        CUDA_ERR_CHECK(cudaMalloc(&dChunks, MAX_N_CHUNKS * CHUNK_SIZE * sizeof(byte)));
+    }
+
+    for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
+    {
+        printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
+        u64 batchSize = batchIdx == batches ? lastBatchSize : FL_BATCH_SIZE;
+        std::vector<byte> batch(batchSize);
+
+        if (!nextBatchReady)
+        {
+            fl = Fl(flMetadata, batchSize);
+            timerCpuInput.start();
+            fl.readFromFile(inFile);
+            timerCpuInput.stop();
+            nextBatchReady = true;
+        }
+
+        switch (version)
+        {
+        case Cpu:
+            timerCpuComputing.start();
+            flDecompressionCPU(fl, batch);
+            timerCpuComputing.stop();
+            nextBatchReady = false;
+            break;
+        case Gpu:
+            timerGpuMemHostToDev.start();
+            CUDA_ERR_CHECK(cudaMemcpy(dBitDepth, fl.bitDepth.data(), fl.nChunks * sizeof(u8), cudaMemcpyHostToDevice));
+            for (u64 i = 0; i < fl.nChunks; i++)
+            {
+                CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
+                                          cudaMemcpyHostToDevice));
+            }
+            timerGpuMemHostToDev.stop();
+
+            timerGpuComputing.start();
+            flDecompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.batchSize, dBitDepth, dChunks);
+            // the kernel launch is async so we read the next batch of input in the meantime
+            u64 tmpBatchSize = fl.batchSize;
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : FL_BATCH_SIZE;
+                fl = Fl(flMetadata, nextBatchSize);
+                fl.readFromFile(inFile);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
+
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, tmpBatchSize * sizeof(byte), cudaMemcpyDeviceToHost));
+            timerGpuMemDevToHost.stop();
+            break;
+        }
+
+        timerCpuOutput.start();
+        writeOutputBatch(outFile, batch);
+        timerCpuOutput.stop();
+    }
 
     switch (version)
     {
-    case CPU:
-    {
-        timer.start();
-        flDecompressionCPU(fl, data);
-        timer.stop();
-        printf("%s\n", timer.formattedResult("[CPU] decompression function").c_str());
+    case Cpu:
+        printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
-    }
-    case GPU:
-    {
-        TimerGPU timerGPU;
-        timerGPU.start();
-        byte* dData;
-        CUDA_ERR_CHECK(cudaMalloc(&dData, fl.dataLen * sizeof(byte)));
-        u8* dBitDepth;
-        CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
-        CUDA_ERR_CHECK(cudaMemcpy(dBitDepth, fl.bitDepth.data(), fl.nChunks * sizeof(u8), cudaMemcpyHostToDevice));
-        byte* dChunks;
-        CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
-        for (u64 i = 0; i < fl.nChunks; i++)
-        {
-            CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
-                cudaMemcpyHostToDevice));
-        }
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
-
-        timerGPU.start();
-        flDecompressionGPU<<<fl.nChunks, CHUNK_SIZE>>>(dData, fl.dataLen, dBitDepth, dChunks);
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] decompression kernel").c_str());
-
-        timerGPU.start();
-        CUDA_ERR_CHECK(cudaMemcpy(data.data(), dData, fl.dataLen * sizeof(byte), cudaMemcpyDeviceToHost));
-        CUDA_ERR_CHECK(cudaFree(dData));
-        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+    case Gpu:
         CUDA_ERR_CHECK(cudaFree(dChunks));
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
+        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+        CUDA_ERR_CHECK(cudaFree(dData));
+        printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }
-    }
-
-    timer.start();
-    writeDataFile(outputPath, data);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] writing the output file").c_str());
+    fclose(outFile);
+    fclose(inFile);
 }

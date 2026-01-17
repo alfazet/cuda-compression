@@ -1,23 +1,23 @@
 #include "rl.cuh"
 #include "timer.cuh"
 
-void rlDecompressionCPU(const Rl& rl, std::vector<byte>& data)
+void rlDecompressionCPU(const Rl& rl, std::vector<byte>& batch)
 {
     u64 p = 0;
-    for (u64 i = 0; i < rl.nRuns; i++)
+    for (u32 i = 0; i < rl.nRuns; i++)
     {
-        for (u32 j = 0; j < rl.runs[i]; j++)
+        for (u32 j = 0; j < rl.lengths[i]; j++)
         {
-            data[p] = rl.values[i];
+            batch[p] = rl.values[i];
             p++;
         }
     }
 }
 
-__global__ void rlFillData(byte* data, u64 dataLen, const u64* scannedRuns, const byte* values, u64 nRuns)
+__global__ void rlFillData(byte* batch, u64 batchSize, const u32* scannedLengths, const byte* values, u32 nRuns)
 {
     u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= dataLen)
+    if (tid >= batchSize)
     {
         return;
     }
@@ -28,7 +28,7 @@ __global__ void rlFillData(byte* data, u64 dataLen, const u64* scannedRuns, cons
     while (l < r)
     {
         u64 mid = l + (r - l) / 2;
-        if (scannedRuns[mid] - 1 < tid)
+        if (scannedLengths[mid] - 1 < tid)
         {
             l = mid + 1;
         }
@@ -38,62 +38,117 @@ __global__ void rlFillData(byte* data, u64 dataLen, const u64* scannedRuns, cons
             i = min(i, mid);
         }
     }
-    data[tid] = values[i];
+    batch[tid] = values[i];
 }
 
 void rlDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
-    TimerCPU timer;
-    timer.start();
-    const Rl rl = rlFromFile(inputPath);
-    std::vector<byte> data(rl.dataLen);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] reading the input file").c_str());
+    FILE* inFile = fopen(inputPath.c_str(), "rb");
+    if (inFile == nullptr)
+    {
+        ERR_AND_DIE("fopen");
+    }
+    FILE* outFile = fopen(outputPath.c_str(), "wb");
+    if (outFile == nullptr)
+    {
+        ERR_AND_DIE("fopen");
+    }
+    RlMetadata rlMetadata(inFile);
+    if (rlMetadata.rawFileSizeTotal == 0)
+    {
+        printf("Empty file\n");
+        fclose(outFile);
+        fclose(inFile);
+        return;
+    }
+
+    u64 batches = ceilDiv(rlMetadata.rawFileSizeTotal, RL_BATCH_SIZE),
+        lastBatchSize = rlMetadata.rawFileSizeTotal % RL_BATCH_SIZE;
+    Rl rl;
+    bool nextBatchReady = false;
+    TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
+    TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
+    byte* dData;
+    byte* dValues;
+    thrust::device_vector<u32> dLengths;
+    thrust::device_vector<u32> dScannedLengths;
+    if (version == Gpu)
+    {
+        CUDA_ERR_CHECK(cudaMalloc(&dData, RL_BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dValues, RL_BATCH_SIZE * sizeof(byte)));
+        dLengths = thrust::device_vector<u32>(RL_BATCH_SIZE);
+        dScannedLengths = thrust::device_vector<u32>(RL_BATCH_SIZE);
+    }
+
+    for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
+    {
+        printf("Processing batch %lu out of %lu...\n", batchIdx, batches);
+        u64 batchSize = batchIdx == batches ? lastBatchSize : RL_BATCH_SIZE;
+        std::vector<byte> batch(batchSize);
+
+        if (!nextBatchReady)
+        {
+            rl = Rl(rlMetadata, batchSize);
+            timerCpuInput.start();
+            rl.readFromFile(inFile);
+            timerCpuInput.stop();
+            nextBatchReady = true;
+        }
+
+        switch (version)
+        {
+        case Cpu:
+            timerCpuComputing.start();
+            rlDecompressionCPU(rl, batch);
+            timerCpuComputing.stop();
+            nextBatchReady = false;
+            break;
+        case Gpu:
+            timerGpuMemHostToDev.start();
+            CUDA_ERR_CHECK(cudaMemcpy(dValues, rl.values.data(), rl.nRuns * sizeof(byte), cudaMemcpyHostToDevice));
+            thrust::copy(thrust::device, rl.lengths.begin(), rl.lengths.end(), dLengths.begin());
+            timerGpuMemHostToDev.stop();
+
+            timerGpuComputing.start();
+            thrust::inclusive_scan(thrust::device, dLengths.begin(), dLengths.end(), dScannedLengths.begin());
+            rlFillData<<<ceilDiv(rl.batchSize, BLOCK_SIZE), BLOCK_SIZE>>>(
+                dData, rl.batchSize, thrust::raw_pointer_cast(dScannedLengths.data()), dValues, rl.nRuns);
+            // the kernel launch is async so we read the next batch of input in the meantime
+            u64 tmpBatchSize = rl.batchSize;
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : RL_BATCH_SIZE;
+                rl = Rl(rlMetadata, nextBatchSize);
+                rl.readFromFile(inFile);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
+
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, tmpBatchSize * sizeof(byte), cudaMemcpyDeviceToHost));
+            timerGpuMemDevToHost.stop();
+            break;
+        }
+
+        timerCpuOutput.start();
+        writeOutputBatch(outFile, batch);
+        timerCpuOutput.stop();
+    }
 
     switch (version)
     {
-    case CPU:
-    {
-        timer.start();
-        rlDecompressionCPU(rl, data);
-        timer.stop();
-        printf("%s\n", timer.formattedResult("[CPU] RL decompression function").c_str());
+    case Cpu:
+        printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
-    }
-    case GPU:
-    {
-        TimerGPU timerGPU;
-        timerGPU.start();
-        byte* dData;
-        CUDA_ERR_CHECK(cudaMalloc(&dData, rl.dataLen * sizeof(byte)));
-        byte* dValues;
-        CUDA_ERR_CHECK(cudaMalloc(&dValues, rl.nRuns * sizeof(byte)));
-        CUDA_ERR_CHECK(cudaMemcpy(dValues, rl.values.data(), rl.nRuns * sizeof(byte), cudaMemcpyHostToDevice));
-        auto dRuns = thrust::device_vector<u32>(rl.runs.begin(), rl.runs.end());
-        auto dScannedRuns = thrust::device_vector<u64>(rl.nRuns);
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] allocating and copying data to device").c_str());
-
-        timerGPU.start();
-        thrust::inclusive_scan(thrust::device, dRuns.begin(), dRuns.end(), dScannedRuns.begin());
-        rlFillData<<<ceilDiv(rl.dataLen, BLOCK_SIZE), BLOCK_SIZE>>>(dData, rl.dataLen,
-                                                                    thrust::raw_pointer_cast(dScannedRuns.data()),
-                                                                    dValues, rl.nRuns);
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] RL decompression kernels and Thrust functions").c_str());
-
-        timerGPU.start();
-        CUDA_ERR_CHECK(cudaMemcpy(data.data(), dData, rl.dataLen * sizeof(byte), cudaMemcpyDeviceToHost));
+    case Gpu:
         CUDA_ERR_CHECK(cudaFree(dValues));
         CUDA_ERR_CHECK(cudaFree(dData));
-        timerGPU.stop();
-        printf("%s\n", timerGPU.formattedResult("[GPU] copying data to host and freeing").c_str());
+        printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }
-    }
-
-    timer.start();
-    writeDataFile(outputPath, data);
-    timer.stop();
-    printf("%s\n", timer.formattedResult("[CPU] writing the output file").c_str());
+    fclose(outFile);
+    fclose(inFile);
 }
