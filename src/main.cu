@@ -102,8 +102,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            printf("TODO\n");
-            // rlDecompression(args.inputFile, args.outputFile, args.version);
+            rlDecompression(args.inputFile, args.outputFile, args.version);
         }
     }
 
