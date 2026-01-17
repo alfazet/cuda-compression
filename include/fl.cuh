@@ -4,7 +4,8 @@
 #include "common.cuh"
 
 constexpr u64 CHUNK_SIZE = 1024;
-constexpr u64 BATCH_SIZE = 128 * 1024 * 1024; // in bytes
+constexpr u64 BATCH_SIZE = 1UL * 512 * 1024 * 1024; // in bytes
+constexpr u64 MAX_N_CHUNKS = BATCH_SIZE / CHUNK_SIZE;
 
 /*
  *  FL data layout in memory:

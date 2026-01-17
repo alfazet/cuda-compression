@@ -72,6 +72,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     FlMetadata flMetadata(inFile);
     if (flMetadata.rawFileSizeTotal == 0)
     {
+        printf("Empty file\n");
         fclose(outFile);
         fclose(inFile);
         return;
@@ -82,6 +83,16 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
     TimerGpu timerGpuMemHostToDev, timerGpuMemDevToHost, timerGpuComputing;
+
+    byte* dData;
+    u8* dBitDepth;
+    byte* dChunks;
+    if (version == Gpu)
+    {
+        CUDA_ERR_CHECK(cudaMalloc(&dData, BATCH_SIZE * sizeof(byte)));
+        CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, MAX_N_CHUNKS * sizeof(u8)));
+        CUDA_ERR_CHECK(cudaMalloc(&dChunks, MAX_N_CHUNKS * CHUNK_SIZE * sizeof(byte)));
+    }
 
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
     {
@@ -108,13 +119,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
             break;
         case Gpu:
             timerGpuMemHostToDev.start();
-            byte* dData;
-            CUDA_ERR_CHECK(cudaMalloc(&dData, fl.batchSize * sizeof(byte)));
-            u8* dBitDepth;
-            CUDA_ERR_CHECK(cudaMalloc(&dBitDepth, fl.nChunks * sizeof(u8)));
             CUDA_ERR_CHECK(cudaMemcpy(dBitDepth, fl.bitDepth.data(), fl.nChunks * sizeof(u8), cudaMemcpyHostToDevice));
-            byte* dChunks;
-            CUDA_ERR_CHECK(cudaMalloc(&dChunks, fl.nChunks * CHUNK_SIZE * sizeof(byte)));
             for (u64 i = 0; i < fl.nChunks; i++)
             {
                 CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
@@ -139,9 +144,6 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
 
             timerGpuMemDevToHost.start();
             CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, tmpBatchSize * sizeof(byte), cudaMemcpyDeviceToHost));
-            CUDA_ERR_CHECK(cudaFree(dData));
-            CUDA_ERR_CHECK(cudaFree(dBitDepth));
-            CUDA_ERR_CHECK(cudaFree(dChunks));
             timerGpuMemDevToHost.stop();
             break;
         }
@@ -157,6 +159,9 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         printCpuTimers(timerCpuInput, timerCpuComputing, timerCpuOutput);
         break;
     case Gpu:
+        CUDA_ERR_CHECK(cudaFree(dData));
+        CUDA_ERR_CHECK(cudaFree(dBitDepth));
+        CUDA_ERR_CHECK(cudaFree(dChunks));
         printGpuTimers(timerCpuInput, timerGpuMemHostToDev, timerGpuComputing, timerGpuMemDevToHost, timerCpuOutput);
         break;
     }
