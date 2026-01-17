@@ -36,7 +36,7 @@ def gen_test(path, kind, size):
 
 
 def run_tests(binary, n_tests, kind, size, raw, compressed, decompressed, version):
-    for method in ["rl"]:
+    for method in ["fl", "rl"]:
         print(f"\n{method.upper()} TESTS")
         for i in range(0, n_tests):
             gen_test(raw, kind, size)
