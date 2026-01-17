@@ -33,7 +33,7 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
         for (u64 j = 0; j < len; j++)
         {
             byte curByte = batch[i * CHUNK_SIZE + j] << (8 - bitDepth);
-            u64 bitLoc = bitDepth * j;
+            u64 bitLoc = j * bitDepth;
             u64 byteLoc = bitLoc >> 3;
             u64 bitOffset = bitLoc & 0b111;
             // place the relevant bits of this byte
@@ -48,46 +48,49 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
     }
 }
 
-// TODO: fix data race in line 75 and UB (__syncthreads_or in while loop)
-__global__ void flCompressionGPU(const byte* data, u64 dataLen, u8* bitDepth, byte* chunks)
+__global__ void flCompressionGPU(const byte* batch, u64 batchLen, u8* bitDepth, byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
-    u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
-    if (tidGlobal >= dataLen)
+    u64 globalTid = blockIdx.x * blockDim.x + tidInBlock;
+    if (globalTid >= batchLen)
     {
         return;
     }
 
-    byte curByte = data[tidGlobal];
-    u8 blockBitDepth = 8;
-    while (blockBitDepth > 0 && __syncthreads_or((1 << (blockBitDepth - 1)) & curByte) == 0)
+    byte myInByte = batch[globalTid];
+    u8 blockBitDepth = 1;
+    for (u8 i = 1; i < 8; i++)
     {
-        blockBitDepth--;
+        // if some byte in this block has the i-th bit on,
+        // then its bit depth >= i + 1
+        if (__syncthreads_or((1 << i) & myInByte) != 0)
+        {
+            blockBitDepth = i + 1;
+        }
     }
-    curByte <<= (8 - blockBitDepth);
     if (tidInBlock == 0)
     {
         bitDepth[blockIdx.x] = blockBitDepth;
     }
-    u64 bitLoc = 1UL * blockBitDepth * tidInBlock;
-    u64 byteLoc = bitLoc >> 3;
-    u64 bitOffset = bitLoc & 0b111;
-    u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
-
-    // split into 8 batches based on the thread id mod 8
-    // to prevent data races
-    for (u8 mod = 0; mod < 8; mod++)
+    // gather bits into my output byte
+    byte myOutByte = 0;
+    u64 myOffset = blockIdx.x * blockDim.x;
+    u64 myEnd = (blockIdx.x + 1) * blockDim.x;
+    for (u8 i = 0; i < 8; i++)
     {
-        if ((tidInBlock & 0b111) == mod)
+        u64 dataByteIdx = myOffset + (tidInBlock * 8 + i) / blockBitDepth;
+        u64 dataBitIdx = (tidInBlock * 8 + i) % blockBitDepth;
+        if (dataByteIdx >= myEnd)
         {
-            chunks[idx] |= curByte >> bitOffset;
-            if (bitOffset != 0)
-            {
-                chunks[idx + 1] |= curByte << (8 - bitOffset);
-            }
+            break;
         }
-        __syncthreads();
+        u8 dataByte = batch[dataByteIdx] << (8 - blockBitDepth);
+        if ((dataByte & (1 << (7 - dataBitIdx))) != 0)
+        {
+            myOutByte |= 1 << (7 - i);
+        }
     }
+    chunks[globalTid] = myOutByte;
 }
 
 void flCompression(const std::string& inputPath, const std::string& outputPath, Version version)

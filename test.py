@@ -7,14 +7,14 @@ import random
 import string
 import subprocess
 
-TEST_NUMERIC = "n"
+TEST_ALPHA = "a"
 TEST_RANDOM = "r"
 TEST_ORDERED = "o"
 TEST_UNIFORM = "u"
 
 
-def gen_random_numeric(size):
-    return bytes(ord("0") + random.randint(0, 9) for _ in range(size))
+def gen_random_alpha(size):
+    return bytes(ord("a") + random.randint(0, 25) for _ in range(size))
 
 
 def gen_random_random(size):
@@ -22,14 +22,14 @@ def gen_random_random(size):
 
 
 def gen_random_uniform(size):
-    r = random.randint(0, 7)
+    r = random.randint(0, 9)
     return bytes(r for _ in range(size))
 
 
 def gen_test(path, kind, size):
     with open(path, "wb") as file:
-        if kind == TEST_NUMERIC:
-            file.write(gen_random_numeric(size))
+        if kind == TEST_ALPHA:
+            file.write(gen_random_alpha(size))
         if kind == TEST_RANDOM:
             file.write(gen_random_random(size))
         if kind == TEST_ORDERED:
@@ -88,8 +88,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "-t",
-    help="type of tests to run ((n)umeric / (r)andom / (o)rdered / (u)niform) [default: (r)]",
-    choices=[TEST_NUMERIC, TEST_RANDOM, TEST_ORDERED, TEST_UNIFORM],
+    help="type of tests to run ((a)lphabet / (r)andom / (o)rdered / (u)niform) [default: (r)]",
+    choices=[TEST_ALPHA, TEST_RANDOM, TEST_ORDERED, TEST_UNIFORM],
     default=TEST_RANDOM,
 )
 parser.add_argument(

@@ -31,12 +31,11 @@ void flDecompressionCPU(const Fl& fl, std::vector<byte>& batch)
     }
 }
 
-// takes "flattened" chunks - chunk 0 is [0, CHUNK_SIZE), chunk 1 is [CHUNK_SIZE, 2 * CHUNK_SIZE), ...
-__global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, const byte* chunks)
+__global__ void flDecompressionGPU(byte* batch, u64 batchLen, const u8* bitDepth, const byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
     u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
-    if (tidGlobal >= dataLen)
+    if (tidGlobal >= batchLen)
     {
         return;
     }
@@ -47,7 +46,6 @@ __global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, 
     u64 bitOffset = bitLoc & 0b111;
     byte mask = 0xff << (8 - blockBitDepth);
     mask >>= bitOffset;
-
     u64 idx = blockIdx.x * blockDim.x + byteLoc; // the index of the byte we're handling
     byte decoded = (chunks[idx] & mask) << bitOffset;
     decoded = decoded >> (8 - blockBitDepth);
@@ -56,7 +54,7 @@ __global__ void flDecompressionGPU(byte* data, u64 dataLen, const u8* bitDepth, 
         mask = (0xff << (8 - bitOffset)) << (8 - blockBitDepth);
         decoded |= ((chunks[idx + 1] & mask) >> (8 - bitOffset)) >> (8 - blockBitDepth);
     }
-    data[tidGlobal] = decoded;
+    batch[tidGlobal] = decoded;
 }
 
 void flDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
