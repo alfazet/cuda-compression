@@ -14,6 +14,33 @@ void rlDecompressionCPU(const Rl& rl, std::vector<byte>& batch)
     }
 }
 
+__global__ void rlFillData(byte* batch, u64 batchSize, const u32* scannedLengths, const byte* values, u32 nRuns)
+{
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= batchSize)
+    {
+        return;
+    }
+
+    // binary search for the smallest i such that scannedRuns[i] - 1 >= tid,
+    // (minus one to account for 0-based indexing)
+    u64 l = 0, r = nRuns - 1, i = nRuns - 1;
+    while (l < r)
+    {
+        u64 mid = l + (r - l) / 2;
+        if (scannedLengths[mid] - 1 < tid)
+        {
+            l = mid + 1;
+        }
+        else
+        {
+            r = mid;
+            i = min(i, mid);
+        }
+    }
+    batch[tid] = values[i];
+}
+
 void rlDecompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
     FILE* inFile = fopen(inputPath.c_str(), "rb");
@@ -50,8 +77,8 @@ void rlDecompression(const std::string& inputPath, const std::string& outputPath
     {
         CUDA_ERR_CHECK(cudaMalloc(&dData, RL_BATCH_SIZE * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMalloc(&dValues, RL_BATCH_SIZE * sizeof(byte)));
-        dLengths.reserve(RL_BATCH_SIZE);
-        dScannedLengths.reserve(RL_BATCH_SIZE);
+        dLengths = thrust::device_vector<u32>(RL_BATCH_SIZE);
+        dScannedLengths = thrust::device_vector<u32>(RL_BATCH_SIZE);
     }
 
     for (u64 batchIdx = 1; batchIdx <= batches; batchIdx++)
@@ -78,6 +105,31 @@ void rlDecompression(const std::string& inputPath, const std::string& outputPath
             nextBatchReady = false;
             break;
         case Gpu:
+            timerGpuMemHostToDev.start();
+            CUDA_ERR_CHECK(cudaMemcpy(dValues, rl.values.data(), rl.nRuns * sizeof(byte), cudaMemcpyHostToDevice));
+            thrust::copy(thrust::device, rl.lengths.begin(), rl.lengths.end(), dLengths.begin());
+            timerGpuMemHostToDev.stop();
+
+            timerGpuComputing.start();
+            thrust::inclusive_scan(thrust::device, dLengths.begin(), dLengths.end(), dScannedLengths.begin());
+            rlFillData<<<ceilDiv(rl.batchSize, BLOCK_SIZE), BLOCK_SIZE>>>(
+                dData, rl.batchSize, thrust::raw_pointer_cast(dScannedLengths.data()), dValues, rl.nRuns);
+            // the kernel launch is async so we read the next batch of input in the meantime
+            u64 tmpBatchSize = rl.batchSize;
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : RL_BATCH_SIZE;
+                rl = Rl(rlMetadata, nextBatchSize);
+                rl.readFromFile(inFile);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
+
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(batch.data(), dData, tmpBatchSize * sizeof(byte), cudaMemcpyDeviceToHost));
+            timerGpuMemDevToHost.stop();
             break;
         }
 

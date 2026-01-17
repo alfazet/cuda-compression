@@ -24,6 +24,43 @@ void rlCompressionCPU(Rl& rl, const std::vector<byte>& batch)
     rl.nRuns = rl.lengths.size();
 }
 
+__global__ void computeCompactedDiff(const u32* scannedDiff, u64 batchSize, u32* compactedDiff, u32* nRuns)
+{
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= batchSize)
+    {
+        return;
+    }
+    if (tid == batchSize - 1)
+    {
+        compactedDiff[scannedDiff[tid]] = tid + 1;
+        *nRuns = scannedDiff[tid];
+    }
+
+    if (tid == 0)
+    {
+        compactedDiff[0] = 0;
+    }
+    else if (scannedDiff[tid] != scannedDiff[tid - 1])
+    {
+        compactedDiff[scannedDiff[tid] - 1] = tid;
+    }
+}
+
+__global__ void computeRuns(const u32* compactedDiff, const byte* batch, byte* values, u32* lengths, const u32* nRuns)
+{
+    u64 tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= *nRuns)
+    {
+        return;
+    }
+
+    u32 l = compactedDiff[tid];
+    u32 r = compactedDiff[tid + 1];
+    values[tid] = batch[l];
+    lengths[tid] = r - l;
+}
+
 void rlCompression(const std::string& inputPath, const std::string& outputPath, Version version)
 {
     FILE* inFile = fopen(inputPath.c_str(), "rb");
@@ -63,9 +100,10 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
     u32* dNRuns;
     if (version == Gpu)
     {
-        dDiff.reserve(RL_BATCH_SIZE);
-        dScannedDiff.reserve(RL_BATCH_SIZE);
-        dData.reserve(RL_BATCH_SIZE);
+        dDiff = thrust::device_vector<u32>(RL_BATCH_SIZE);
+        dDiff[0] = 1;
+        dScannedDiff = thrust::device_vector<u32>(RL_BATCH_SIZE);
+        dData = thrust::device_vector<byte>(RL_BATCH_SIZE);
         CUDA_ERR_CHECK(cudaMalloc(&dCompactedDiff, (RL_BATCH_SIZE + 1) * sizeof(u32)));
         CUDA_ERR_CHECK(cudaMalloc(&dValues, RL_BATCH_SIZE * sizeof(byte)));
         CUDA_ERR_CHECK(cudaMalloc(&dLengths, RL_BATCH_SIZE * sizeof(u32)));
@@ -93,8 +131,39 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
             timerCpuComputing.stop();
             nextBatchReady = false;
             break;
-            break;
         case Gpu:
+            timerGpuMemHostToDev.start();
+            thrust::copy(thrust::device, batch.begin(), batch.end(), dData.begin());
+            timerGpuMemHostToDev.stop();
+
+            timerGpuComputing.start();
+            thrust::transform(thrust::device, dData.begin() + 1, dData.begin() + static_cast<long>(batchSize),
+                              dData.begin(), dDiff.begin() + 1,
+                              [] __device__(const byte x, const byte y) { return x == y ? 0 : 1; });
+            thrust::inclusive_scan(thrust::device, dDiff.begin(), dDiff.end(), dScannedDiff.begin());
+            u64 gridDim = ceilDiv(batchSize, BLOCK_SIZE);
+            computeCompactedDiff<<<gridDim, BLOCK_SIZE>>>(thrust::raw_pointer_cast(dScannedDiff.data()), batchSize,
+                                                          dCompactedDiff, dNRuns);
+            computeRuns<<<gridDim, BLOCK_SIZE>>>(dCompactedDiff, thrust::raw_pointer_cast(dData.data()), dValues,
+                                                 dLengths, dNRuns);
+            // the kernel launches are async so we read the next batch of input in the meantime
+            if (batchIdx < batches)
+            {
+                timerCpuInput.start();
+                u64 nextBatchSize = batchIdx + 1 == batches ? lastBatchSize : RL_BATCH_SIZE;
+                batch = readInputBatch(inFile, nextBatchSize);
+                timerCpuInput.stop();
+                nextBatchReady = true;
+            }
+            timerGpuComputing.stop();
+
+            timerGpuMemDevToHost.start();
+            CUDA_ERR_CHECK(cudaMemcpy(&rl.nRuns, dNRuns, sizeof(u32), cudaMemcpyDeviceToHost));
+            rl.lengths.resize(rl.nRuns);
+            rl.values.resize(rl.nRuns);
+            CUDA_ERR_CHECK(cudaMemcpy(rl.values.data(), dValues, rl.nRuns * sizeof(byte), cudaMemcpyDeviceToHost));
+            CUDA_ERR_CHECK(cudaMemcpy(rl.lengths.data(), dLengths, rl.nRuns * sizeof(u32), cudaMemcpyDeviceToHost));
+            timerGpuMemDevToHost.stop();
             break;
         }
 

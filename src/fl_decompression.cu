@@ -31,11 +31,11 @@ void flDecompressionCPU(const Fl& fl, std::vector<byte>& batch)
     }
 }
 
-__global__ void flDecompressionGPU(byte* batch, u64 batchLen, const u8* bitDepth, const byte* chunks)
+__global__ void flDecompressionGPU(byte* batch, u64 batchSize, const u8* bitDepth, const byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
     u64 tidGlobal = blockIdx.x * blockDim.x + tidInBlock;
-    if (tidGlobal >= batchLen)
+    if (tidGlobal >= batchSize)
     {
         return;
     }
@@ -78,7 +78,8 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         return;
     }
 
-    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE), lastBatchSize = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
+    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE),
+        lastBatchSize = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
     Fl fl;
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;
@@ -123,7 +124,7 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
             for (u64 i = 0; i < fl.nChunks; i++)
             {
                 CUDA_ERR_CHECK(cudaMemcpy(dChunks + i * CHUNK_SIZE, fl.chunks[i].data(), CHUNK_SIZE * sizeof(byte),
-                    cudaMemcpyHostToDevice));
+                                          cudaMemcpyHostToDevice));
             }
             timerGpuMemHostToDev.stop();
 

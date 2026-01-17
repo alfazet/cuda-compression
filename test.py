@@ -9,7 +9,6 @@ import subprocess
 
 TEST_ALPHA = "a"
 TEST_RANDOM = "r"
-TEST_ORDERED = "o"
 TEST_UNIFORM = "u"
 
 
@@ -31,8 +30,6 @@ def gen_test(path, kind, size):
         if kind == TEST_ALPHA:
             file.write(gen_random_alpha(size))
         if kind == TEST_RANDOM:
-            file.write(gen_random_random(size))
-        if kind == TEST_ORDERED:
             file.write(gen_random_random(size))
         if kind == TEST_UNIFORM:
             file.write(gen_random_uniform(size))
@@ -88,8 +85,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "-t",
-    help="type of tests to run ((a)lphabet / (r)andom / (o)rdered / (u)niform) [default: (r)]",
-    choices=[TEST_ALPHA, TEST_RANDOM, TEST_ORDERED, TEST_UNIFORM],
+    help="type of tests to run ((a)lphabet / (r)andom / (u)niform) [default: (r)]",
+    choices=[TEST_ALPHA, TEST_RANDOM, TEST_UNIFORM],
     default=TEST_RANDOM,
 )
 parser.add_argument(

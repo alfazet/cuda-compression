@@ -48,11 +48,11 @@ void flCompressionCPU(Fl& fl, const std::vector<byte>& batch)
     }
 }
 
-__global__ void flCompressionGPU(const byte* batch, u64 batchLen, u8* bitDepth, byte* chunks)
+__global__ void flCompressionGPU(const byte* batch, u64 batchSize, u8* bitDepth, byte* chunks)
 {
     u64 tidInBlock = threadIdx.x;
     u64 globalTid = blockIdx.x * blockDim.x + tidInBlock;
-    if (globalTid >= batchLen)
+    if (globalTid >= batchSize)
     {
         return;
     }
@@ -177,7 +177,7 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
             for (u64 i = 0; i < fl.nChunks; i++)
             {
                 CUDA_ERR_CHECK(cudaMemcpy(fl.chunks[i].data(), dChunks + i * CHUNK_SIZE, CHUNK_SIZE * sizeof(byte),
-                    cudaMemcpyDeviceToHost));
+                                          cudaMemcpyDeviceToHost));
             }
             timerGpuMemDevToHost.stop();
             break;
