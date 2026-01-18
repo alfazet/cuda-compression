@@ -107,7 +107,7 @@ void rlDecompression(const std::string& inputPath, const std::string& outputPath
         case Gpu:
             timerGpuMemHostToDev.start();
             CUDA_ERR_CHECK(cudaMemcpy(dValues, rl.values.data(), rl.nRuns * sizeof(byte), cudaMemcpyHostToDevice));
-            thrust::copy(thrust::device, rl.lengths.begin(), rl.lengths.end(), dLengths.begin());
+            thrust::copy(rl.lengths.begin(), rl.lengths.end(), dLengths.begin());
             timerGpuMemHostToDev.stop();
 
             timerGpuComputing.start();

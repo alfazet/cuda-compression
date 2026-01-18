@@ -73,7 +73,7 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
     {
         ERR_AND_DIE("fopen");
     }
-    u64 rawFileSize = std::filesystem::file_size(inputPath);
+    u64 rawFileSize = fileSize(inputPath);
     if (rawFileSize == 0)
     {
         printf("Empty file\n");
@@ -133,7 +133,7 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
             break;
         case Gpu:
             timerGpuMemHostToDev.start();
-            thrust::copy(thrust::device, batch.begin(), batch.end(), dData.begin());
+            thrust::copy(batch.begin(), batch.end(), dData.begin());
             timerGpuMemHostToDev.stop();
 
             timerGpuComputing.start();
