@@ -82,7 +82,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "The input and output files must be different\n");
         return EXIT_FAILURE;
     }
-    if (!std::filesystem::exists(args.inputFile))
+    if (!fileExists(args.inputFile))
     {
         fprintf(stderr, "File %s not found\n", args.inputFile.c_str());
         return EXIT_FAILURE;
