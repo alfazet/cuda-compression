@@ -78,8 +78,9 @@ void flDecompression(const std::string& inputPath, const std::string& outputPath
         return;
     }
 
-    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE),
-        lastBatchSize = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
+    u64 batches = ceilDiv(flMetadata.rawFileSizeTotal, FL_BATCH_SIZE);
+    u64 rem = flMetadata.rawFileSizeTotal % FL_BATCH_SIZE;
+    u64 lastBatchSize = rem == 0 ? FL_BATCH_SIZE : rem;
     Fl fl;
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;

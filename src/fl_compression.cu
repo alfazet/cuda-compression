@@ -116,7 +116,9 @@ void flCompression(const std::string& inputPath, const std::string& outputPath, 
 
     FlMetadata flMetadata(rawFileSize);
     flMetadata.writeToFile(outFile);
-    u64 batches = ceilDiv(rawFileSize, FL_BATCH_SIZE), lastBatchSize = rawFileSize % FL_BATCH_SIZE;
+    u64 batches = ceilDiv(rawFileSize, FL_BATCH_SIZE);
+    u64 rem = rawFileSize % FL_BATCH_SIZE;
+    u64 lastBatchSize = rem == 0 ? FL_BATCH_SIZE : rem;
     std::vector<byte> batch;
     batch.reserve(FL_BATCH_SIZE);
     bool nextBatchReady = false;

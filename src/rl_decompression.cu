@@ -62,8 +62,9 @@ void rlDecompression(const std::string& inputPath, const std::string& outputPath
         return;
     }
 
-    u64 batches = ceilDiv(rlMetadata.rawFileSizeTotal, RL_BATCH_SIZE),
-        lastBatchSize = rlMetadata.rawFileSizeTotal % RL_BATCH_SIZE;
+    u64 batches = ceilDiv(rlMetadata.rawFileSizeTotal, RL_BATCH_SIZE);
+    u64 rem = rlMetadata.rawFileSizeTotal % RL_BATCH_SIZE;
+    u64 lastBatchSize = rem == 0 ? RL_BATCH_SIZE : rem;
     Rl rl;
     bool nextBatchReady = false;
     TimerCpu timerCpuInput, timerCpuOutput, timerCpuComputing;

@@ -84,7 +84,9 @@ void rlCompression(const std::string& inputPath, const std::string& outputPath, 
 
     RlMetadata rlMetadata(rawFileSize);
     rlMetadata.writeToFile(outFile);
-    u64 batches = ceilDiv(rawFileSize, RL_BATCH_SIZE), lastBatchSize = rawFileSize % RL_BATCH_SIZE;
+    u64 batches = ceilDiv(rawFileSize, RL_BATCH_SIZE);
+    u64 rem = rawFileSize % RL_BATCH_SIZE;
+    u64 lastBatchSize = rem == 0 ? RL_BATCH_SIZE : rem;
     std::vector<byte> batch;
     batch.reserve(RL_BATCH_SIZE);
     bool nextBatchReady = false;
